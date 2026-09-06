@@ -1,0 +1,25 @@
+[Unit]
+Description=Transcribe Telegram voice and video locally with whisper.cpp
+After=network-online.target tgbiz-collector.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-archive-mcp
+EnvironmentFile=/opt/telegram-archive-mcp/.env
+ExecStart=/usr/bin/node /opt/telegram-archive-mcp/dist/transcribe.js
+Restart=always
+RestartSec=15
+# Whisper is the greedy one here; keep it from starving the collector and MCP.
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=1400M
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/telegram-archive-mcp/data
+
+[Install]
+WantedBy=multi-user.target

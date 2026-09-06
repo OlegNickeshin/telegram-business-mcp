@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+# ...but the template is the first thing an install needs.
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+data/

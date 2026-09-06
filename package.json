@@ -1,0 +1,47 @@
+{
+  "name": "telegram-business-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Use your personal Telegram from ChatGPT Web, Claude Web and other MCP clients via the official Telegram Business API. No MTProto session.",
+  "scripts": {
+    "build": "tsc",
+    "collector": "node --env-file=.env dist/collector.js",
+    "mcp-http": "node --env-file=.env dist/mcp-http.js",
+    "recent": "node --env-file=.env dist/cli.js",
+    "diagnose": "node tests/diagnose.mjs",
+    "linear-sync": "node --env-file=.env dist/linear-sync.js",
+    "linear-check": "node --env-file=.env dist/linear-sync.js --check",
+    "linear-dryrun": "node --env-file=.env dist/linear-sync.js --dry-run",
+    "linear-backfill": "node --env-file=.env dist/linear-sync.js --backfill",
+    "transcribe": "node --env-file=.env dist/transcribe.js",
+    "transcribe-once": "node --env-file=.env dist/transcribe.js --once"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^11.10.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OlegNickeshin/telegram-business-mcp.git"
+  },
+  "keywords": [
+    "telegram",
+    "telegram-business",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "chatgpt",
+    "self-hosted",
+    "sqlite",
+    "fts5",
+    "typescript"
+  ]
+}

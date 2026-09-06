@@ -1,0 +1,37 @@
+# Two processes, one image, one volume. The collector writes the archive and
+# the MCP server reads it, so they must share /data.
+services:
+  collector:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/telegram.db
+    volumes: ["archive:/data"]
+    command: ["node", "dist/collector.js"]
+
+  mcp:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/telegram.db
+      MCP_HTTP_HOST: 0.0.0.0
+    volumes: ["archive:/data"]
+    # Loopback only: terminate TLS in a reverse proxy in front of this.
+    ports: ["127.0.0.1:8124:8124"]
+    depends_on: [collector]
+
+  # Optional. Inert without LINEAR_API_KEY, so it is safe to leave running.
+  linear:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/telegram.db
+    volumes: ["archive:/data"]
+    command: ["node", "dist/linear-sync.js"]
+    profiles: ["linear"]
+
+volumes:
+  archive:

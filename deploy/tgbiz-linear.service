@@ -1,0 +1,21 @@
+[Unit]
+Description=Mirror the Telegram archive into Linear (issue per chat, comment per message)
+After=network-online.target tgbiz-collector.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-archive-mcp
+EnvironmentFile=/opt/telegram-archive-mcp/.env
+ExecStart=/usr/bin/node /opt/telegram-archive-mcp/dist/linear-sync.js
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/telegram-archive-mcp/data
+
+[Install]
+WantedBy=multi-user.target

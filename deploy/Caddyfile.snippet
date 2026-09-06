@@ -1,0 +1,18 @@
+# Add inside the existing site block, before the catch-all `handle`.
+# Caddy matches `handle` by path specificity, so these win over the fallback.
+
+# The MCP endpoint ChatGPT connects to. Every request needs the secret
+# (Bearer header, ?k=, or trailing path segment) — see src/mcp-http.ts.
+handle /tg-mcp* {
+    uri strip_prefix /tg-mcp
+    reverse_proxy 127.0.0.1:8124 {
+        # MCP streams responses; never buffer them.
+        flush_interval -1
+    }
+}
+
+# Plain JSON read API, handy for curl and for the stdio fallback.
+handle /tg-read/* {
+    uri strip_prefix /tg-read
+    reverse_proxy 127.0.0.1:8123
+}

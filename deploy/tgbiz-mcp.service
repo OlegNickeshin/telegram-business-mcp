@@ -1,0 +1,21 @@
+[Unit]
+Description=Telegram Business read-only MCP server (Streamable HTTP)
+After=network-online.target tgbiz-collector.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-archive-mcp
+EnvironmentFile=/opt/telegram-archive-mcp/.env
+ExecStart=/usr/bin/node /opt/telegram-archive-mcp/dist/mcp-http.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/telegram-archive-mcp/data
+
+[Install]
+WantedBy=multi-user.target
