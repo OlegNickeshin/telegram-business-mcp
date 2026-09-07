@@ -1,7 +1,13 @@
 # telegram-business-mcp
 
-**Access your personal Telegram directly from ChatGPT.com and Claude.ai via the
-official Telegram Business API — no MTProto, no user session.**
+**A self-hosted remote Telegram connector for ChatGPT.com, Claude.ai and other
+MCP clients — built on the official Telegram Business API, with no MTProto user
+session.**
+
+Turn Telegram into model-readable context: search conversations, import old
+history, transcribe voice, read xlsx/docx/PDF/text attachments, and optionally
+reply as yourself. The assistant gets the conversation and the useful content
+inside it, not just message metadata or file links.
 
 Remote MCP over HTTPS. Nothing installed on your side: no browser extension, no
 local proxy, no desktop client.
@@ -19,11 +25,11 @@ chatgpt.com / claude.ai  →  remote HTTPS MCP  →  SQLite archive  →  Telegr
 ```
 
 * Search and read your Telegram conversations from the chat you already use.
-* A growing local archive, full-text searchable, on your own server.
+* Keep a full-text searchable archive on your own server and import older history.
+* Let the model read documents and transcribed speech inside the conversation.
 * Reply as yourself through the official Telegram Business API.
 * Self-hosted end to end — your machine, your SQLite file.
 * Groups and forum topics.
-* Optional local voice transcription, so search finds words that were spoken.
 
 ## Why this exists
 
@@ -408,6 +414,10 @@ already had open, and every existing route wanted a user session on a server I
 would then have to trust forever. The long version — what was tried, what the
 platforms refuse to do, and why the pieces ended up arranged this way — is in
 [the write-up](https://nikeshin.space/en/entry/telegram-to-chatgpt/).
+
+Built by [Oleg Nikeshin](https://nikeshin.space/) — an AI Automation Engineer
+focused on production AI integrations, MCP systems, automation, reliability and
+observable deployments.
 
 ## Support
 
