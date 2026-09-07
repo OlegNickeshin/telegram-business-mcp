@@ -265,6 +265,17 @@ restart `tgbiz-mcp`. Test with a message to yourself first. What changes: the
 endpoint secret now writes to the owner's contacts, not just reads — rotate it
 if the URL ever leaks.
 
+**Reading PDFs.** Spreadsheets, Word documents and text files are read with no
+extra packages. PDFs need one, and it is a single line:
+
+```bash
+apt-get install -y poppler-utils
+```
+
+Without it, PDFs still return their name, size and link — only the text is
+missing, and the tool says which package to install. Worth doing up front: it
+takes a second and the alternative is a confusing answer later.
+
 **Voice transcription.** Needs swap on a 2 GB box — set that up *before*
 building, or the first run takes down the neighbouring services:
 

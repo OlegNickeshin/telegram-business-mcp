@@ -105,7 +105,7 @@ off if one server serves both.
 | `telegram_search_messages` | always | full-text, including transcripts |
 | `telegram_find_chat` | always | resolve a name to a `chat_id` |
 | `telegram_get_photo` | `ALLOW_MEDIA=1` | a photo, as a link and/or bytes |
-| `telegram_get_file` | `ALLOW_MEDIA=1` | any attachment — PDF, xlsx, docx, video, audio — as a link |
+| `telegram_get_file` | `ALLOW_MEDIA=1` | **reads** an attachment — xlsx, docx, PDF, text — plus a link for the rest |
 | `telegram_send_message` | `ALLOW_SEND=1` | **sends as you** |
 | `telegram_edit_message` | `ALLOW_SEND=1` | rewrites one of your own |
 | `telegram_mark_read` | `ALLOW_SEND=1` | clears an unread badge |
@@ -122,18 +122,49 @@ to your contacts.
 
 ### Attachments
 
-`telegram_get_file` returns whatever a message carries — spreadsheet, PDF,
-document, video, audio, voice, sticker — as a filename, MIME type, size and a
-link this server serves. Receive only: nothing is ever uploaded to Telegram.
+`telegram_get_file` reads the file, not just its name. Ask about the spreadsheet
+someone sent and you get the cells.
 
-The bytes are not pulled when the tool is called, only when someone opens the
-link, so asking about a 15 MB file costs one API round trip. The link carries a
-short opaque token rather than the endpoint secret, and the response sets the
-real MIME type with an RFC 5987 filename, so a non-Latin name survives the
-download and a browser plays or previews what it can.
+| Format | What comes back |
+|---|---|
+| `.xlsx` / `.xlsm` | rows, tab-separated, one `## sheet name` heading per sheet |
+| `.docx` | paragraphs, with table rows tab-separated |
+| `.pdf` | text, if `pdftotext` is installed (see below) |
+| `.txt` `.csv` `.md` `.json` `.xml` `.log` `.srt` … | as they are |
+| image, video, audio, archive | no text in it — filename, type, size and a link |
 
-**Telegram refuses to serve any file over 20 MB to a bot**, so those cannot be
-fetched at all — the tool says so instead of failing obscurely.
+Receive only: nothing is ever uploaded to Telegram.
+
+Extraction is built on `zlib`, which ships with Node — xlsx and docx are ZIP
+containers of XML, so reading them costs no dependency. Dates are the one place
+that needs care: a cell holding a deadline is a number plus a format, and
+without reading `styles.xml` a due date reads as `46023`. Currency formats are
+excluded so a price does not become a date.
+
+PDF is the exception and needs a system package:
+
+```bash
+apt-get install -y poppler-utils
+```
+
+Without it, PDFs still return their metadata and link, and the tool says what to
+install. Pre-2007 binary `.doc` and `.xls` are not supported and say so.
+
+Two limits, and neither is arbitrary:
+
+* **A few thousand rows do not fit in one reply.** The result carries
+  `lines N-M of TOTAL` and the `offset_lines` to pass next, so a client can walk
+  a whole spreadsheet — 11 calls for a 2 680-row one. `max_chars` changes the
+  window size. Cuts land on line boundaries; half a row of tab-separated cells
+  is unreadable.
+* **Telegram refuses to serve any file over 20 MB to a bot.** Those cannot be
+  fetched at all, and files above `EXTRACT_MAX_BYTES` (12 MB) return metadata
+  and a link rather than being downloaded to be read.
+
+Bytes are pulled only when there is text in them, so asking about a video note
+still costs one metadata call. The link carries a short opaque token rather than
+the endpoint secret, and sets the real MIME type with an RFC 5987 filename, so a
+non-Latin name survives the download and a browser plays or previews what it can.
 
 ### Sending
 
@@ -333,6 +364,8 @@ directly produces the same `chat.id` as their business chat but an independent
   `MCP_INLINE_IMAGE=1` for clients that support it.
 * Photos are not OCR'd; video is not transcribed by default.
 * Sending is text only — no media, and no way to target a specific forum topic.
+  Receiving files works both ways round: metadata always, contents for the
+  formats above.
 * The archive grows without bound unless you use `telegram_forget`.
 
 ## Data model

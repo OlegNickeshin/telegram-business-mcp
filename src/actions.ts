@@ -9,6 +9,7 @@
  */
 import type Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
+import { EXTRACT_MAX_BYTES, extractText, isExtractable } from "./extract.js";
 import { call, contentType, type TgMessage } from "./telegram.js";
 import { saveBusinessMessage } from "./store.js";
 import { displayName } from "./queries.js";
@@ -506,18 +507,25 @@ export const photoUrl = (db: Database.Database, chatId: number, messageId: numbe
   fileUrl(db, chatId, messageId, "jpg");
 
 /**
- * Any attachment, as a link rather than bytes. A spreadsheet or a PDF is of no
- * use to a model as base64 — it needs somewhere to fetch it from, and so does
- * the person reading the reply.
+ * Everything about one attachment: what it is, where to get it, and — for the
+ * formats that have text in them — the text itself.
  *
- * Metadata only: the bytes are never pulled here. `getFile` confirms Telegram
- * will still serve the file and gives its real size, and the download happens
- * once, when someone opens the link.
+ * The text is the point. A link is no use to a model that cannot fetch URLs, so
+ * "here is the spreadsheet someone sent" has to mean the cells. Bytes are
+ * downloaded only when there is something to read in them: a video note still
+ * costs one metadata round trip.
+ *
+ * Extraction failing is not the call failing. The file is still there and the
+ * link still works, so the reason is reported alongside the metadata rather
+ * than thrown.
  */
 export async function fetchFile(
   db: Database.Database,
   chatId: number,
-  messageId: number
+  messageId: number,
+  includeText = true,
+  maxChars?: number,
+  offsetLines = 0
 ): Promise<{
   filename: string;
   mimeType: string;
@@ -525,6 +533,13 @@ export async function fetchFile(
   message_type: string;
   caption: string | null;
   url: string | null;
+  text: string | null;
+  text_engine: string | null;
+  text_truncated: boolean;
+  text_error: string | null;
+  from_line: number | null;
+  to_line: number | null;
+  total_lines: number | null;
 }> {
   const p = pickFile(db, chatId, messageId);
   const file = await call<{ file_path?: string; file_size?: number }>("getFile", {
@@ -533,16 +548,51 @@ export async function fetchFile(
 
   const mimeType = mimeFor(p.mime, p.name, file.file_path ?? "");
   const ext = extFor(p.name, mimeType, file.file_path ?? "");
+  const filename = p.name ?? `tg-${chatId}-${messageId}.${ext}`;
+  // getFile is authoritative; the size in the update can be absent.
+  const bytes = file.file_size ?? p.size ?? 0;
 
-  return {
-    filename: p.name ?? `tg-${chatId}-${messageId}.${ext}`,
+  const base = {
+    filename,
     mimeType,
-    // getFile is authoritative; the size in the update can be absent.
-    bytes: file.file_size ?? p.size ?? 0,
+    bytes,
     message_type: p.contentType,
     caption: p.caption,
     url: fileUrl(db, chatId, messageId, ext),
+    text: null as string | null,
+    text_engine: null as string | null,
+    text_truncated: false,
+    text_error: null as string | null,
+    from_line: null as number | null,
+    to_line: null as number | null,
+    total_lines: null as number | null,
   };
+
+  if (!includeText || !isExtractable(mimeType, filename)) return base;
+  if (bytes > EXTRACT_MAX_BYTES) {
+    return {
+      ...base,
+      text_error: `file is ${(bytes / 1e6).toFixed(1)}MB; too large to read as text ` +
+        `(limit ${(EXTRACT_MAX_BYTES / 1e6).toFixed(0)}MB) — use the link`,
+    };
+  }
+
+  try {
+    const raw = await fetchFileRaw(db, chatId, messageId);
+    const got = extractText(raw.buf, mimeType, filename, maxChars, offsetLines);
+    if (!got) return base;
+    return {
+      ...base,
+      text: got.text,
+      text_engine: got.engine,
+      text_truncated: got.truncated,
+      from_line: got.from_line,
+      to_line: got.to_line,
+      total_lines: got.total_lines,
+    };
+  } catch (err) {
+    return { ...base, text_error: (err as Error).message };
+  }
 }
 
 /** Resolves a short photo token back to the message it points at. */

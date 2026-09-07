@@ -263,18 +263,38 @@ export function createMcpServer(call: ToolCaller): McpServer {
     server.registerTool(
       FILE_TOOL,
       {
-        title: "Get a Telegram attachment",
+        title: "Read a Telegram attachment",
         description:
-          "Get a file someone sent — a document, spreadsheet, PDF, video, audio or voice " +
-          "message. Returns the filename, type, size and a direct link; include that link " +
-          "in your reply so the user can open or download it. Use the chat_id and message_id " +
-          "of a message whose message_type is not 'text'. Files over 20 MB cannot be fetched: " +
-          "the Telegram Bot API refuses to serve them.",
+          "Read a file someone sent. For a spreadsheet (.xlsx), Word document (.docx), PDF " +
+          "or any text format this returns the actual contents — cells, paragraphs, rows — " +
+          "so you can answer questions about what is inside it. Spreadsheet rows come back " +
+          "tab-separated, one sheet per '## name' heading. For a video, audio or image there " +
+          "is no text to read and you get the filename, type, size and a link instead. " +
+          "Use the chat_id and message_id of a message whose message_type is not 'text'. " +
+          "Telegram refuses to serve files over 20 MB to a bot, so those cannot be fetched.",
         inputSchema: {
           chat_id: z.number().int().describe("Chat the file is in."),
           message_id: z.number().int().describe("message_id of the message carrying the file."),
+          include_text: z
+            .boolean()
+            .optional()
+            .describe("Default true. Set false to get only metadata and skip reading contents."),
+          max_chars: z
+            .number()
+            .int()
+            .optional()
+            .describe("How much text to return at once. Defaults to a readable slice."),
+          offset_lines: z
+            .number()
+            .int()
+            .optional()
+            .describe(
+              "Skip this many lines before reading. A big spreadsheet does not fit in one " +
+                "response, so page through it: the result says which lines you got and how " +
+                "many there are in total."
+            ),
         },
-        annotations: readOnly("Get a Telegram attachment"),
+        annotations: readOnly("Read a Telegram attachment"),
       },
       async (args) => {
         const r = (await call(FILE_TOOL, args as Args)) as {
@@ -284,6 +304,13 @@ export function createMcpServer(call: ToolCaller): McpServer {
           message_type: string;
           caption: string | null;
           url: string | null;
+          text: string | null;
+          text_engine: string | null;
+          text_truncated: boolean;
+          text_error: string | null;
+          from_line: number | null;
+          to_line: number | null;
+          total_lines: number | null;
         };
         const lines = [
           `${r.filename} — ${r.mimeType}, ${Math.round(r.bytes / 1024)} KB (${r.message_type})`,
@@ -291,6 +318,19 @@ export function createMcpServer(call: ToolCaller): McpServer {
           r.url ? `[Open ${r.filename}](${r.url})` : null,
           r.url,
         ].filter(Boolean) as string[];
+
+        if (r.text_error) lines.push(`Could not read the contents: ${r.text_error}`);
+        if (r.text != null) {
+          const where = `lines ${r.from_line}-${r.to_line} of ${r.total_lines}`;
+          lines.push(
+            "",
+            r.text_truncated
+              ? `--- contents (${r.text_engine}, ${where}) — for the next part call again ` +
+                `with offset_lines=${r.to_line} ---`
+              : `--- contents (${r.text_engine}, ${where}) ---`,
+            r.text
+          );
+        }
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
         };

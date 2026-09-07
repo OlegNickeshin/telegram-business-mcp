@@ -203,7 +203,16 @@ export async function runTool(
       const chatId = requireChatId(args);
       const messageId = Number(args.message_id);
       if (!Number.isFinite(messageId)) throw new Error("message_id is required");
-      return fetchFile(db, chatId, Math.trunc(messageId));
+      const maxChars = args.max_chars != null ? Number(args.max_chars) : undefined;
+      const offset = Number(args.offset_lines ?? 0);
+      return fetchFile(
+        db,
+        chatId,
+        Math.trunc(messageId),
+        args.include_text !== false,
+        Number.isFinite(maxChars) ? maxChars : undefined,
+        Number.isFinite(offset) ? offset : 0
+      );
     }
 
     case SEND_TOOL: {

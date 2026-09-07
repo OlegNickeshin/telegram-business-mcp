@@ -11,6 +11,12 @@ RUN npx tsc
 FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+# poppler-utils is the one thing reading attachments cannot do itself: xlsx and
+# docx are ZIP+XML and come free with zlib, but PDF text needs pdftotext. ~15 MB,
+# against a PDF otherwise arriving as a link nobody can follow.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends poppler-utils \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
