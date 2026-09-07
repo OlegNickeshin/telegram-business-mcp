@@ -80,7 +80,19 @@ function msgOut(m: MessageRow) {
             read_with: `${m.content_type === "photo" ? MEDIA_TOOL : FILE_TOOL} ` +
               `(chat_id=${m.chat_id}, message_id=${m.message_id})`,
           },
-    text: m.text ?? m.caption ?? null,
+    // A voice message or round video has no written text at all, so `text` was
+    // null while the words sat in `transcript` — and a reader that checks one
+    // field concludes nothing was said. Fall back, and say where it came from
+    // so speech is never quoted as if it had been typed.
+    text: m.text ?? m.caption ?? m.transcript ?? null,
+    text_source:
+      m.text != null
+        ? "written"
+        : m.caption != null
+          ? "caption"
+          : m.transcript != null
+            ? `speech transcribed from ${m.content_type}`
+            : null,
     // Speech recognised locally from voice/video. Null until transcribed.
     transcript: m.transcript,
     transcript_engine: m.transcript_engine,

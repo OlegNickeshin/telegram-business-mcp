@@ -324,9 +324,16 @@ systemctl enable --now tgbiz-transcribe
 
 Voice notes and round video messages by default (`TRANSCRIBE_TYPES`) — Telegram
 caps both at a minute, so they are cheap. Full video files are left out: each
-one runs for minutes on two cores. The transcript is indexed for
-search, exposed as a `transcript` field on every message, and appended to the
-Media is deleted as soon as the text is stored.
+one runs for minutes on two cores. Media is deleted as soon as the text is
+stored.
+
+The transcript is indexed for search and exposed two ways: as its own
+`transcript` field, and as the message's `text` — because a voice message or a
+round video has no written text, and a reader that checks `text` and finds null
+concludes nothing was said. `text_source` says which it was (`written`,
+`caption`, or `speech transcribed from video_note`), so speech is never quoted
+as if it had been typed. `message_type` still distinguishes a round video from a
+voice message.
 
 Pin `WHISPER_LANG`. `auto` mis-detected a short Russian clip as English in
 testing.
