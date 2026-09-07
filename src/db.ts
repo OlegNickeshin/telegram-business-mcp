@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { DB_PATH } from "./config.js";
+import { fileInfo, type TgMessage } from "./telegram.js";
 
 export function openDb(readonly = false): Database.Database {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -34,6 +35,53 @@ export function openDb(readonly = false): Database.Database {
 }
 
 /** Idempotent ALTER: SQLite has no ADD COLUMN IF NOT EXISTS. */
+/**
+ * Fills file_name/file_size for messages stored before those columns existed.
+ *
+ * The values were always in `raw`, so this is a re-read rather than a loss —
+ * but parsing JSON for every row on every read is not, which is why they get
+ * their own columns. Runs once: after this, only rows that still have no name
+ * are considered, and a genuinely nameless attachment (a voice note, a sticker)
+ * keeps a size, so it is not re-examined either.
+ */
+function backfillFileInfo(db: Database.Database): void {
+  // Every caller opens for writing today, but a read-only one would otherwise
+  // fail here rather than simply skipping a convenience.
+  if (db.readonly) return;
+  const rows = db
+    .prepare(
+      `SELECT id, raw FROM messages
+        WHERE content_type NOT IN ('text', 'other')
+          AND file_name IS NULL AND file_size IS NULL`
+    )
+    .all() as { id: number; raw: string }[];
+  if (!rows.length) return;
+
+  const update = db.prepare("UPDATE messages SET file_name = ?, file_size = ? WHERE id = ?");
+  let written = 0;
+  let named = 0;
+  db.transaction(() => {
+    for (const r of rows) {
+      let info: { name: string | null; size: number | null };
+      try {
+        info = fileInfo(JSON.parse(r.raw) as TgMessage);
+      } catch {
+        // A row whose raw will not parse is not worth failing a startup over.
+        // Deliberately narrow: a failing UPDATE must not be swallowed here.
+        continue;
+      }
+      if (info.name == null && info.size == null) continue;
+      written += update.run(info.name, info.size, r.id).changes;
+      if (info.name) named++;
+    }
+  })();
+  // Report what was written, not what was looked at — the difference is the
+  // whole signal when something is quietly not persisting.
+  console.log(
+    `[db] attachment details: ${written} of ${rows.length} messages updated (${named} named)`
+  );
+}
+
 function addColumn(db: Database.Database, table: string, column: string, decl: string): void {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (cols.some((c) => c.name === column)) return;
@@ -196,6 +244,11 @@ export function migrate(db: Database.Database): void {
   addColumn(db, "messages", "media_error", "TEXT");
   addColumn(db, "linear_comments", "transcript_synced", "INTEGER NOT NULL DEFAULT 0");
   // Group and forum support: Business messages have neither.
+  // So the message list can name the attachment instead of just typing it.
+  addColumn(db, "messages", "file_name", "TEXT");
+  addColumn(db, "messages", "file_size", "INTEGER");
+  backfillFileInfo(db);
+
   addColumn(db, "messages", "message_thread_id", "INTEGER");
   addColumn(db, "messages", "topic_name", "TEXT");
 

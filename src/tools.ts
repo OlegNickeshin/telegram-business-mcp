@@ -69,6 +69,17 @@ function msgOut(m: MessageRow) {
       ? { thread_id: m.message_thread_id, name: m.topic_name }
       : null,
     message_type: m.content_type,
+    // Named so a reader can tell which document is being discussed, and told
+    // where the contents are — otherwise "message_type: document" is a dead end.
+    file:
+      m.content_type === "text" || (m.file_name == null && m.file_size == null)
+        ? null
+        : {
+            name: m.file_name,
+            size_bytes: m.file_size,
+            read_with: `${m.content_type === "photo" ? MEDIA_TOOL : FILE_TOOL} ` +
+              `(chat_id=${m.chat_id}, message_id=${m.message_id})`,
+          },
     text: m.text ?? m.caption ?? null,
     // Speech recognised locally from voice/video. Null until transcribed.
     transcript: m.transcript,

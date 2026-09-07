@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import {
   contentType,
+  fileInfo,
   type TgBusinessConnection,
   type TgDeletedBusinessMessages,
   type TgMessage,
@@ -167,12 +168,12 @@ export function saveBusinessMessage(
          (business_connection_id, chat_id, message_id, update_id, from_id, from_is_bot,
           from_first_name, from_last_name, from_username, outgoing, date, edit_date,
           text, caption, content_type, reply_to_message_id, forward_origin, raw, created_at,
-          message_thread_id, topic_name)
+          message_thread_id, topic_name, file_name, file_size)
        VALUES
          (@bc, @chat_id, @message_id, @update_id, @from_id, @from_is_bot,
           @from_first_name, @from_last_name, @from_username, @outgoing, @date, @edit_date,
           @text, @caption, @content_type, @reply_to, @forward_origin, @raw, @created_at,
-          @thread_id, @topic_name)
+          @thread_id, @topic_name, @file_name, @file_size)
        ON CONFLICT (business_connection_id, chat_id, message_id) DO NOTHING`
     )
     .run({
@@ -191,6 +192,8 @@ export function saveBusinessMessage(
       text: msg.text ?? null,
       caption: msg.caption ?? null,
       content_type: contentType(msg),
+      file_name: fileInfo(msg).name,
+      file_size: fileInfo(msg).size,
       thread_id: msg.message_thread_id ?? null,
       topic_name: topicName,
       reply_to: msg.reply_to_message?.message_id ?? null,
@@ -223,7 +226,8 @@ export function saveEditedBusinessMessage(
     .prepare(
       `UPDATE messages
           SET text = @text, caption = @caption, edit_date = @edit_date,
-              content_type = @content_type, edited_at = @edited_at, raw = @raw
+              content_type = @content_type, edited_at = @edited_at, raw = @raw,
+              file_name = @file_name, file_size = @file_size
         WHERE business_connection_id = @bc AND chat_id = @chat_id AND message_id = @message_id`
     )
     .run({
@@ -234,6 +238,8 @@ export function saveEditedBusinessMessage(
       caption: msg.caption ?? null,
       edit_date: msg.edit_date ?? null,
       content_type: contentType(msg),
+      file_name: fileInfo(msg).name,
+      file_size: fileInfo(msg).size,
       edited_at: now(),
       raw: JSON.stringify(msg),
     });

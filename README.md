@@ -125,6 +125,11 @@ to your contacts.
 `telegram_get_file` reads the file, not just its name. Ask about the spreadsheet
 someone sent and you get the cells.
 
+Every message that carries one names it in the message list — filename, size,
+and which tool reads it — so a transcript says *which* document was sent rather
+than only that one was. `message_type: document` on its own is a dead end: the
+conversation around it says "here is the table" and nothing connects the two.
+
 | Format | What comes back |
 |---|---|
 | `.xlsx` / `.xlsm` | rows, tab-separated, one `## sheet name` heading per sheet |

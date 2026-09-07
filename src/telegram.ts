@@ -148,6 +148,31 @@ export function contentType(msg: TgMessage): string {
   return "other";
 }
 
+/**
+ * Name and size of whatever file a message carries.
+ *
+ * Stored alongside the message so a transcript can say *which* document it was.
+ * "message_type: document" tells a reader nothing — the conversation around it
+ * says "here is the table", and the name is what connects the two.
+ */
+export function fileInfo(msg: TgMessage): { name: string | null; size: number | null } {
+  const bag = msg as unknown as Record<string, unknown>;
+  for (const key of MEDIA_KEYS) {
+    const v = bag[key];
+    if (v == null) continue;
+    // `photo` is the odd one out: an array of sizes, and never named.
+    if (Array.isArray(v)) {
+      const largest = v[v.length - 1] as { file_size?: number } | undefined;
+      return { name: null, size: largest?.file_size ?? null };
+    }
+    if (typeof v === "object") {
+      const f = v as { file_name?: string; file_size?: number };
+      return { name: f.file_name ?? null, size: f.file_size ?? null };
+    }
+  }
+  return { name: null, size: null };
+}
+
 export function updateType(u: TgUpdate): string {
   for (const k of ALLOWED_UPDATES) {
     if (u[k] != null) return k;
