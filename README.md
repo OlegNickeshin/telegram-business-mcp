@@ -124,6 +124,30 @@ and it works, but it is the one irreversible operation in reach — a single wro
 `message_id` destroys someone else's message for both sides. That should cost a
 code change, not a flag flip.
 
+## Importing your existing history
+
+The Bot API cannot reach messages sent before the bot was connected. Telegram's
+own export can, and it costs the server nothing: you produce the file in your
+own client, so no user session ever exists here.
+
+1. Telegram Desktop → **Settings → Advanced → Export Telegram data**.
+2. Format **Machine-readable JSON**. Media files are not needed — only the text
+   and metadata are imported.
+3. Copy `result.json` to the server and run:
+
+```bash
+npm run import -- path/to/result.json --dry-run   # show what would land
+npm run import -- path/to/result.json
+```
+
+Desktop numbers messages the same way the Bot API does, so imported rows share
+a key space with live ones: the two histories merge on
+`(business_connection_id, chat_id, message_id)`, overlapping messages are
+recognised rather than duplicated, and re-running the import changes nothing.
+
+Everything downstream comes along — direction, media type, replies, edits, and
+full-text search over the imported text.
+
 ## Where this runs
 
 **On a server, not a laptop.** Two things force it:
@@ -247,7 +271,8 @@ directly produces the same `chat.id` as their business chat but an independent
 
 ## Known limitations
 
-* **The archive starts when the collector starts.** The Bot API cannot backfill.
+* **The archive starts when the collector starts** — but you can fill in the
+  past once, from an official Telegram Desktop export. See below.
 * **Pictures do not reach ChatGPT.** Not a bug here. ChatGPT strips images that
   come out of a tool — a tool-supplied image URL is a silent exfiltration
   channel — and in testing it suppressed plain links from tool output too,

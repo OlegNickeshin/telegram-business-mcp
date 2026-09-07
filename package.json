@@ -15,7 +15,8 @@
     "linear-dryrun": "node --env-file=.env dist/linear-sync.js --dry-run",
     "linear-backfill": "node --env-file=.env dist/linear-sync.js --backfill",
     "transcribe": "node --env-file=.env dist/transcribe.js",
-    "transcribe-once": "node --env-file=.env dist/transcribe.js --once"
+    "transcribe-once": "node --env-file=.env dist/transcribe.js --once",
+    "import": "node --env-file=.env dist/import-export.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
