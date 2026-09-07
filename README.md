@@ -243,7 +243,9 @@ bash ./models/download-ggml-model.sh small
 systemctl enable --now tgbiz-transcribe
 ```
 
-Voice only by default (`TRANSCRIBE_TYPES`). The transcript is indexed for
+Voice notes and round video messages by default (`TRANSCRIBE_TYPES`) — Telegram
+caps both at a minute, so they are cheap. Full video files are left out: each
+one runs for minutes on two cores. The transcript is indexed for
 search, exposed as a `transcript` field on every message, and appended to the
 Media is deleted as soon as the text is stored.
 

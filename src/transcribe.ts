@@ -57,19 +57,42 @@ interface Job {
   raw: string;
 }
 
-/** Types we will never transcribe are parked once, so they stop being scanned. */
-function parkUnwantedTypes(db: Database.Database): number {
+const PARKED = "type not in TRANSCRIBE_TYPES";
+
+/**
+ * Keeps the queue in step with TRANSCRIBE_TYPES in both directions: types no
+ * longer wanted are parked so they stop being scanned, and types that were
+ * parked but are wanted again come back.
+ *
+ * The second half matters because widening the list is the normal way to add a
+ * media type, and without it everything already parked would stay invisible —
+ * the setting would appear to work while quietly ignoring the backlog.
+ */
+function syncQueueWithTypes(db: Database.Database): { parked: number; revived: number } {
   const wanted = AUDIO_TYPES.map((t) => `'${t}'`).join(",");
-  return db
+  const parked = db
     .prepare(
-      `UPDATE messages SET media_status = 'skipped',
-              media_error = 'type not in TRANSCRIBE_TYPES'
+      `UPDATE messages SET media_status = 'skipped', media_error = ?
         WHERE content_type IN ('voice','video_note','audio','video')
           AND content_type NOT IN (${wanted})
           AND transcript IS NULL
           AND (media_status IS NULL OR media_status = 'pending')`
     )
-    .run().changes;
+    .run(PARKED).changes;
+
+  // Only rows parked for this reason: a genuine error or an oversized file
+  // must stay where it is.
+  const revived = db
+    .prepare(
+      `UPDATE messages SET media_status = 'pending', media_error = NULL
+        WHERE content_type IN (${wanted})
+          AND transcript IS NULL
+          AND media_status = 'skipped'
+          AND media_error = ?`
+    )
+    .run(PARKED).changes;
+
+  return { parked, revived };
 }
 
 function queue(db: Database.Database, limit = 20): Job[] {
@@ -88,11 +111,22 @@ function queue(db: Database.Database, limit = 20): Job[] {
 }
 
 /** Pulls the file_id and size out of whichever media field this message carries. */
-function mediaRef(job: Job): { fileId: string; size: number | null } | null {
-  const m = JSON.parse(job.raw) as Record<string, { file_id?: string; file_size?: number }>;
+function mediaRef(
+  job: Job
+): { fileId: string; uniqueId: string | null; size: number | null } | null {
+  const m = JSON.parse(job.raw) as Record<
+    string,
+    { file_id?: string; file_unique_id?: string; file_size?: number }
+  >;
   for (const key of MEDIA_KEYS) {
     const v = m[key];
-    if (v?.file_id) return { fileId: v.file_id, size: v.file_size ?? null };
+    if (v?.file_id) {
+      return {
+        fileId: v.file_id,
+        uniqueId: v.file_unique_id ?? null,
+        size: v.file_size ?? null,
+      };
+    }
   }
   return null;
 }
@@ -119,6 +153,84 @@ function mark(
     .run(status, error, id);
 }
 
+function store(
+  db: Database.Database,
+  id: number,
+  text: string,
+  engine: string
+): void {
+  db.prepare(
+    `UPDATE messages
+        SET transcript = ?, transcript_at = ?, transcript_engine = ?,
+            media_status = 'done', media_error = NULL
+      WHERE id = ?`
+  ).run(text, Math.floor(Date.now() / 1000), engine, id);
+}
+
+/**
+ * The same file forwarded or resent arrives as several messages with distinct
+ * file_ids but one file_unique_id. Transcribing it once per copy is pure waste —
+ * a minute of video costs about a minute of CPU here.
+ */
+function cachedTranscript(
+  db: Database.Database,
+  uniqueId: string | null
+): { transcript: string; engine: string } | null {
+  if (!uniqueId) return null;
+  return (
+    (db
+      .prepare("SELECT transcript, engine FROM media_transcripts WHERE file_unique_id = ?")
+      .get(uniqueId) as { transcript: string; engine: string } | undefined) ?? null
+  );
+}
+
+/**
+ * Seeds the cache from transcripts produced before it existed, so an archive
+ * that already holds work benefits on the first run rather than the second.
+ */
+function backfillCache(db: Database.Database): number {
+  const rows = db
+    .prepare(
+      `SELECT m.raw, m.transcript, m.transcript_engine AS engine
+         FROM messages m
+        WHERE m.transcript IS NOT NULL AND m.content_type <> 'text'`
+    )
+    .all() as { raw: string; transcript: string; engine: string | null }[];
+
+  let n = 0;
+  const insert = db.prepare(
+    `INSERT INTO media_transcripts (file_unique_id, transcript, engine, created_at)
+     VALUES (?, ?, ?, ?) ON CONFLICT(file_unique_id) DO NOTHING`
+  );
+  const now = Math.floor(Date.now() / 1000);
+  for (const r of rows) {
+    let unique: string | null = null;
+    try {
+      const m = JSON.parse(r.raw) as Record<string, { file_unique_id?: string }>;
+      for (const key of MEDIA_KEYS) {
+        if (m[key]?.file_unique_id) { unique = m[key]!.file_unique_id!; break; }
+      }
+    } catch {
+      continue; // an unparseable payload is not worth failing startup over
+    }
+    if (unique) n += insert.run(unique, r.transcript, r.engine, now).changes;
+  }
+  return n;
+}
+
+function cacheTranscript(
+  db: Database.Database,
+  uniqueId: string | null,
+  text: string,
+  engine: string
+): void {
+  if (!uniqueId) return;
+  db.prepare(
+    `INSERT INTO media_transcripts (file_unique_id, transcript, engine, created_at)
+     VALUES (?, ?, ?, ?) ON CONFLICT(file_unique_id) DO NOTHING`
+  ).run(uniqueId, text, engine, Math.floor(Date.now() / 1000));
+}
+
 async function transcribeOne(db: Database.Database, job: Job): Promise<boolean> {
   const ref = mediaRef(job);
   if (!ref) {
@@ -129,6 +241,13 @@ async function transcribeOne(db: Database.Database, job: Job): Promise<boolean> 
     mark(db, job.id, "skipped", `file is ${(ref.size / 1e6).toFixed(1)}MB, over the Bot API 20MB limit`);
     log(`#${job.message_id} ${job.content_type}: skipped, ${(ref.size / 1e6).toFixed(1)}MB > 20MB`);
     return false;
+  }
+
+  const cached = cachedTranscript(db, ref.uniqueId);
+  if (cached) {
+    store(db, job.id, cached.transcript, cached.engine);
+    log(`#${job.message_id} ${job.content_type}: reused a transcript of the same file`);
+    return true;
   }
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tgbiz-"));
@@ -165,11 +284,9 @@ async function transcribeOne(db: Database.Database, job: Job): Promise<boolean> 
       return false;
     }
 
-    db.prepare(
-      `UPDATE messages
-          SET transcript = ?, transcript_at = ?, transcript_engine = ?, media_status = 'done', media_error = NULL
-        WHERE id = ?`
-    ).run(text, Math.floor(Date.now() / 1000), `whisper.cpp ${path.basename(WHISPER_MODEL)}`, job.id);
+    const engine = `whisper.cpp ${path.basename(WHISPER_MODEL)}`;
+    store(db, job.id, text, engine);
+    cacheTranscript(db, ref.uniqueId, text, engine);
 
     log(`#${job.message_id} ${job.content_type}: ${text.length} chars in ${seconds}s — "${text.slice(0, 90).replace(/\s+/g, " ")}"`);
     return true;
@@ -205,8 +322,12 @@ async function main(): Promise<void> {
     log(`re-queued ${n} previously failed item(s)`);
   }
 
-  const parked = parkUnwantedTypes(db);
+  const { parked, revived } = syncQueueWithTypes(db);
   if (parked > 0) log(`parked ${parked} item(s) whose type is not transcribed`);
+  if (revived > 0) log(`re-queued ${revived} item(s) whose type is now transcribed`);
+
+  const seeded = backfillCache(db);
+  if (seeded > 0) log(`seeded the file cache with ${seeded} existing transcript(s)`);
 
   const pending = queue(db, 10_000).length;
   log(`transcriber up. types=${AUDIO_TYPES.join(",")} model=${path.basename(WHISPER_MODEL)} lang=${WHISPER_LANG} threads=${WHISPER_THREADS}`);

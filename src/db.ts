@@ -129,6 +129,16 @@ export function migrate(db: Database.Database): void {
       updated_at       INTEGER NOT NULL
     );
 
+    -- Transcripts keyed by the file itself, not by the message. Telegram gives
+    -- every copy of a forwarded file its own file_id but one file_unique_id, so
+    -- without this a circle sent to three people is transcribed three times.
+    CREATE TABLE IF NOT EXISTS media_transcripts (
+      file_unique_id TEXT PRIMARY KEY,
+      transcript     TEXT NOT NULL,
+      engine         TEXT,
+      created_at     INTEGER NOT NULL
+    );
+
     -- Short opaque links to photos. The MCP secret must not appear in a URL
     -- handed to a chat client: a long high-entropy path is exactly the shape of
     -- a data-exfiltration link, and it puts the master credential into the
