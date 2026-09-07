@@ -6,6 +6,11 @@ official Telegram Business API — no MTProto, no user session.**
 Remote MCP over HTTPS. Nothing installed on your side: no browser extension, no
 local proxy, no desktop client.
 
+If you are looking for a Telegram MCP server, ChatGPT Telegram connector, Claude
+Telegram connector, or an MCP integration for the Telegram Business API that
+does not require an MTProto user session, this project is built for that use
+case.
+
 Read the story and the architecture notes:
 [I connected my Telegram to ChatGPT. Then Claude connected to the same thing](https://nikeshin.space/en/entry/telegram-to-chatgpt/)
 
@@ -27,14 +32,36 @@ yourself over MTProto, which leaves a session file on the host. That file is
 the account: whoever copies it can read everything, message anyone, and change
 your settings, and revoking it means invalidating your own sessions.
 
-This uses a bot token and a Telegram Business connection instead. If the server
-is compromised, the attacker gets the archive — not the account — and the token
-dies with one command in @BotFather.
+This uses a bot token and a Telegram Business connection instead, so no Telegram
+MTProto user session is stored on the server. That narrows the blast radius
+without eliminating it: a compromised host exposes the local archive, the bot
+token, the MCP secret, and whatever the Business connection lets that bot do —
+which can include sending as you. Serious, but not the same as a stolen user
+session, and the token is revoked with one command in @BotFather.
 
 The cost is real and worth knowing before you start: a bot cannot read history
 from before it was connected. The archive begins empty and grows from the
 moment the collector runs. Telegram's Bot API offers no backfill, and nothing
 here can invent one.
+
+## Why this instead of MTProto
+
+|  | `telegram-business-mcp` | MTProto / user-session approach |
+|---|---|---|
+| Official Telegram Business API | yes | no |
+| MTProto user session required | no | usually |
+| Telegram session file on server | no | usually |
+| Remote HTTPS MCP | yes | varies |
+| ChatGPT Web | yes | varies |
+| Claude Web | yes | varies |
+| Self-hosted | yes | varies |
+| Read-only by default | yes | varies |
+| Searchable local archive | yes | varies |
+| Import old Telegram history | yes, via Telegram Desktop export | varies |
+
+The trade-off: the Telegram Bot API cannot fetch messages that arrived before
+the bot was connected. The live archive starts when the collector does, and
+older history is brought in once from the official Telegram Desktop JSON export.
 
 ## Setting it up in ChatGPT Web
 
