@@ -5,6 +5,9 @@
 Remote MCP over HTTPS — no browser extension, no local proxy, no MTProto user
 session.
 
+Read the story and the architecture notes:
+[I connected my Telegram to ChatGPT. Then Claude connected to the same thing](https://nikeshin.space/en/entry/telegram-to-chatgpt/)
+
 ```
 ChatGPT Web / Claude Web  →  remote HTTPS MCP  →  SQLite archive  →  Telegram Business Bot API
 ```
@@ -301,6 +304,14 @@ raw update JSON.
   archive, and a deleted message is still something you may want to ask about.
 * **Direction** compares `from.id` to the connection owner, backfilled through
   `getBusinessConnection` when the connection predates the collector.
+
+## Background
+
+Built because I wanted my own Telegram answerable from the chat window I
+already had open, and every existing route wanted a user session on a server I
+would then have to trust forever. The long version — what was tried, what the
+platforms refuse to do, and why the pieces ended up arranged this way — is in
+[the write-up](https://nikeshin.space/en/entry/telegram-to-chatgpt/).
 
 ## Support
 
