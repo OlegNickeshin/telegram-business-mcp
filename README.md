@@ -376,16 +376,21 @@ directly produces the same `chat.id` as their business chat but an independent
   `MCP_INLINE_IMAGE=1` for clients that support it.
 * Photos are not OCR'd; video is not transcribed by default.
 * Sending is text only — no media, and no way to target a specific forum topic.
-  Receiving files works both ways round: metadata always, contents for the
-  formats above.
+  Receiving is unaffected: metadata for every attachment, contents for the
+  formats listed above.
 * The archive grows without bound unless you use `telegram_forget`.
 
 ## Data model
 
 `messages` keeps `chat_id`, `message_id`, `business_connection_id`, sender
-fields, `date`, `text`, `caption`, `content_type`, `message_thread_id`,
-`topic_name`, plus `outgoing`, `edit_date`, `is_deleted`, `transcript` and the
-raw update JSON.
+fields, `date`, `text`, `caption`, `content_type`, `file_name`, `file_size`,
+`message_thread_id`, `topic_name`, plus `outgoing`, `edit_date`, `is_deleted`,
+`transcript` and the raw update JSON.
+
+`file_name` and `file_size` are duplicated out of the raw JSON on purpose: the
+values were always in there, but parsing every row's JSON on every read is not
+worth it to name a document. Columns added later are backfilled from `raw` at
+startup, once.
 
 * **Dedup** — `updates.update_id` is a primary key and `messages` is unique on
   `(business_connection_id, chat_id, message_id)`. Both matter: Telegram
