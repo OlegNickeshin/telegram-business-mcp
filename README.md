@@ -1,15 +1,16 @@
 # telegram-business-mcp
 
-**Use your personal Telegram directly from ChatGPT Web and Claude Web.**
+**Access your personal Telegram directly from ChatGPT.com and Claude.ai via the
+official Telegram Business API — no MTProto, no user session.**
 
-Remote MCP over HTTPS — no browser extension, no local proxy, no MTProto user
-session.
+Remote MCP over HTTPS. Nothing installed on your side: no browser extension, no
+local proxy, no desktop client.
 
 Read the story and the architecture notes:
 [I connected my Telegram to ChatGPT. Then Claude connected to the same thing](https://nikeshin.space/en/entry/telegram-to-chatgpt/)
 
 ```
-ChatGPT Web / Claude Web  →  remote HTTPS MCP  →  SQLite archive  →  Telegram Business Bot API
+chatgpt.com / claude.ai  →  remote HTTPS MCP  →  SQLite archive  →  Telegram Business Bot API
 ```
 
 * Search and read your Telegram conversations from the chat you already use.
