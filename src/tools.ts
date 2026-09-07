@@ -4,6 +4,7 @@ import {
   ALLOW_MEDIA,
   ALLOW_SEND,
   editMessage,
+  fetchFile,
   fetchPhoto,
   forget,
   markRead,
@@ -98,6 +99,7 @@ export const TOOL_NAMES: ToolName[] = [
 
 /** Extra tools the MCP server may expose, each behind its own env switch. */
 export const MEDIA_TOOL = "telegram_get_photo";
+export const FILE_TOOL = "telegram_get_file";
 export const SEND_TOOL = "telegram_send_message";
 export const EDIT_TOOL = "telegram_edit_message";
 export const READ_TOOL = "telegram_mark_read";
@@ -106,7 +108,7 @@ export const FORGET_TOOL = "telegram_forget";
 export function enabledToolNames(): string[] {
   return [
     ...TOOL_NAMES,
-    ...(ALLOW_MEDIA ? [MEDIA_TOOL] : []),
+    ...(ALLOW_MEDIA ? [MEDIA_TOOL, FILE_TOOL] : []),
     ...(ALLOW_SEND ? [SEND_TOOL, EDIT_TOOL, READ_TOOL] : []),
     ...(ALLOW_FORGET ? [FORGET_TOOL] : []),
   ];
@@ -194,6 +196,14 @@ export async function runTool(
       const messageId = Number(args.message_id);
       if (!Number.isFinite(messageId)) throw new Error("message_id is required");
       return fetchPhoto(db, chatId, Math.trunc(messageId));
+    }
+
+    case FILE_TOOL: {
+      if (!ALLOW_MEDIA) throw new Error(`${FILE_TOOL} is disabled on this server`);
+      const chatId = requireChatId(args);
+      const messageId = Number(args.message_id);
+      if (!Number.isFinite(messageId)) throw new Error("message_id is required");
+      return fetchFile(db, chatId, Math.trunc(messageId));
     }
 
     case SEND_TOOL: {

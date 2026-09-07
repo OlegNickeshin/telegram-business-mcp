@@ -8,7 +8,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ALLOW_FORGET, ALLOW_MEDIA, ALLOW_SEND } from "./actions.js";
-import { EDIT_TOOL, FORGET_TOOL, MEDIA_TOOL, READ_TOOL, SEND_TOOL } from "./tools.js";
+import { EDIT_TOOL, FILE_TOOL, FORGET_TOOL, MEDIA_TOOL, READ_TOOL, SEND_TOOL } from "./tools.js";
 
 export type ToolArgs = Record<string, unknown>;
 export type ToolCaller = (name: string, args: ToolArgs) => Promise<unknown>;
@@ -256,6 +256,43 @@ export function createMcpServer(call: ToolCaller): McpServer {
           ],
           // What the Apps SDK widget reads; ignored by clients without it.
           structuredContent: { url: r.url!, caption: r.caption },
+        };
+      }
+    );
+
+    server.registerTool(
+      FILE_TOOL,
+      {
+        title: "Get a Telegram attachment",
+        description:
+          "Get a file someone sent — a document, spreadsheet, PDF, video, audio or voice " +
+          "message. Returns the filename, type, size and a direct link; include that link " +
+          "in your reply so the user can open or download it. Use the chat_id and message_id " +
+          "of a message whose message_type is not 'text'. Files over 20 MB cannot be fetched: " +
+          "the Telegram Bot API refuses to serve them.",
+        inputSchema: {
+          chat_id: z.number().int().describe("Chat the file is in."),
+          message_id: z.number().int().describe("message_id of the message carrying the file."),
+        },
+        annotations: readOnly("Get a Telegram attachment"),
+      },
+      async (args) => {
+        const r = (await call(FILE_TOOL, args as Args)) as {
+          filename: string;
+          mimeType: string;
+          bytes: number;
+          message_type: string;
+          caption: string | null;
+          url: string | null;
+        };
+        const lines = [
+          `${r.filename} — ${r.mimeType}, ${Math.round(r.bytes / 1024)} KB (${r.message_type})`,
+          r.caption ? `Caption: ${r.caption}` : null,
+          r.url ? `[Open ${r.filename}](${r.url})` : null,
+          r.url,
+        ].filter(Boolean) as string[];
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
         };
       }
     );

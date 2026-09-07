@@ -260,20 +260,112 @@ export function forget(
   };
 }
 
+/** Telegram's own download cap. Anything larger cannot be fetched at all. */
+export const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024;
+
+export interface FetchedFile {
+  buf: Buffer;
+  mimeType: string;
+  filename: string;
+  caption: string | null;
+  contentType: string;
+}
+
+/** Media fields that carry a single file, unlike `photo` which carries sizes. */
+const SINGLE_FILE_KEYS = [
+  "document", "video", "audio", "voice", "video_note", "animation", "sticker",
+] as const;
+
+const EXT_BY_MIME: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/zip": "zip",
+  "text/csv": "csv",
+  "text/plain": "txt",
+  "audio/ogg": "oga",
+  "video/mp4": "mp4",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+};
+
+function extFor(filename: string | undefined, mime: string, filePath: string): string {
+  const fromName = filename?.match(/\.([A-Za-z0-9]{1,8})$/)?.[1];
+  if (fromName) return fromName.toLowerCase();
+  const fromPath = filePath.match(/\.([A-Za-z0-9]{1,8})$/)?.[1];
+  return EXT_BY_MIME[mime] ?? fromPath?.toLowerCase() ?? "bin";
+}
+
 /**
- * Downloads a stored photo.
- *
- * Telegram ships every photo in several ready-made sizes, so a byte budget is
- * met by choosing a smaller variant rather than by re-encoding: no image
- * library, no quality loss beyond what Telegram already produced. `maxBytes`
- * picks the largest variant that fits; if none does, the smallest is used.
+ * Telegram declares `mime_type` for documents, audio and voice, but not for
+ * video notes or stickers — those would otherwise be served as
+ * application/octet-stream, which makes a browser download a file it could
+ * simply play. The extension on `file_path` is the only hint available, so fall
+ * back to it.
  */
-export async function fetchPhotoRaw(
+const MIME_BY_EXT: Record<string, string> = {
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  gif: "image/gif",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  pdf: "application/pdf",
+  tgs: "application/gzip",
+};
+
+function mimeFor(declared: string | undefined, filename: string | undefined, filePath: string): string {
+  if (declared) return declared;
+  const ext =
+    filename?.match(/\.([A-Za-z0-9]{1,8})$/)?.[1]?.toLowerCase() ??
+    filePath.match(/\.([A-Za-z0-9]{1,8})$/)?.[1]?.toLowerCase();
+  return (ext && MIME_BY_EXT[ext]) || "application/octet-stream";
+}
+
+/**
+ * Downloads whatever file a stored message carries — document, video, audio,
+ * voice, sticker or photo.
+ *
+ * Photos are the one type Telegram sends in several ready-made sizes, so a byte
+ * budget is met there by choosing a smaller variant rather than re-encoding: no
+ * image library, no quality loss beyond what Telegram already produced.
+ * `maxBytes` picks the largest variant that fits; if none does, the smallest is
+ * used. For every other type there is a single file and the budget can only
+ * refuse it.
+ */
+interface PickedFile {
+  fileId: string;
+  name?: string;
+  mime?: string;
+  size?: number;
+  caption: string | null;
+  contentType: string;
+}
+
+/**
+ * Works out which file a stored message carries, without touching the network.
+ *
+ * Photos are the one type Telegram sends in several ready-made sizes, so a byte
+ * budget is met there by choosing a smaller variant rather than re-encoding: no
+ * image library, no quality loss beyond what Telegram already produced.
+ * `maxBytes` picks the largest variant that fits; if none does, the smallest is
+ * used. For every other type there is a single file and the budget can only
+ * refuse it.
+ */
+function pickFile(
   db: Database.Database,
   chatId: number,
   messageId: number,
   maxBytes?: number
-): Promise<{ buf: Buffer; mimeType: string; filename: string; caption: string | null }> {
+): PickedFile {
   if (!ALLOW_MEDIA) throw new Error("Media fetching is disabled on this server (ALLOW_MEDIA=0)");
 
   const row = db
@@ -285,34 +377,91 @@ export async function fetchPhotoRaw(
 
   const msg = JSON.parse(row.raw) as TgMessage & {
     photo?: { file_id: string; file_size?: number }[];
-  };
-  if (contentType(msg) !== "photo" || !msg.photo?.length) {
-    throw new Error(`message ${messageId} is a ${row.content_type}, not a photo`);
+  } & Record<string, { file_id?: string; file_size?: number; file_name?: string; mime_type?: string }>;
+
+  let fileId: string | undefined;
+  let name: string | undefined;
+  let mime: string | undefined;
+  let size: number | undefined;
+
+  if (msg.photo?.length) {
+    // Variants come smallest-first from Telegram.
+    const variants = msg.photo;
+    let pick = variants[variants.length - 1];
+    if (maxBytes && maxBytes > 0) {
+      const fits = variants.filter((v) => (v.file_size ?? Infinity) <= maxBytes);
+      pick = fits.length ? fits[fits.length - 1] : variants[0];
+    }
+    fileId = pick.file_id;
+    size = pick.file_size;
+    mime = "image/jpeg";
+  } else {
+    for (const key of SINGLE_FILE_KEYS) {
+      const v = msg[key];
+      if (v?.file_id) {
+        fileId = v.file_id;
+        name = v.file_name;
+        mime = v.mime_type;
+        size = v.file_size;
+        break;
+      }
+    }
   }
 
-  // Variants come smallest-first from Telegram.
-  const variants = msg.photo;
-  let pick = variants[variants.length - 1];
-  if (maxBytes && maxBytes > 0) {
-    const fits = variants.filter((v) => (v.file_size ?? Infinity) <= maxBytes);
-    pick = fits.length ? fits[fits.length - 1] : variants[0];
+  if (!fileId) {
+    throw new Error(`message ${messageId} is a ${row.content_type} and carries no file`);
+  }
+  // Refuse before spending a round trip on something Telegram will not serve.
+  if (size != null && size > TELEGRAM_FILE_LIMIT) {
+    throw new Error(
+      `file is ${(size / 1e6).toFixed(1)}MB; the Bot API will not serve anything over 20MB`
+    );
   }
 
-  const file = await call<{ file_path: string }>("getFile", { file_id: pick.file_id });
+  return { fileId, name, mime, size, caption: row.caption, contentType: row.content_type };
+}
+
+/** Downloads whatever file a stored message carries. */
+export async function fetchFileRaw(
+  db: Database.Database,
+  chatId: number,
+  messageId: number,
+  maxBytes?: number
+): Promise<FetchedFile> {
+  const p = pickFile(db, chatId, messageId, maxBytes);
+
+  const file = await call<{ file_path: string }>("getFile", { file_id: p.fileId });
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`, {
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
   if (!res.ok) throw new Error(`download returned HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  const png = file.file_path.endsWith(".png");
+
+  const mimeType = mimeFor(p.mime, p.name, file.file_path);
+  const ext = extFor(p.name, mimeType, file.file_path);
 
   return {
     buf,
-    mimeType: png ? "image/png" : "image/jpeg",
-    filename: `tg-${chatId}-${messageId}.${png ? "png" : "jpg"}`,
-    caption: row.caption,
+    mimeType,
+    filename: p.name ?? `tg-${chatId}-${messageId}.${ext}`,
+    caption: p.caption,
+    contentType: p.contentType,
   };
+}
+
+/** Photos only, for callers that must not be handed a spreadsheet by surprise. */
+export async function fetchPhotoRaw(
+  db: Database.Database,
+  chatId: number,
+  messageId: number,
+  maxBytes?: number
+): Promise<FetchedFile> {
+  const r = await fetchFileRaw(db, chatId, messageId, maxBytes);
+  if (!r.mimeType.startsWith("image/")) {
+    throw new Error(`message ${messageId} is a ${r.contentType}, not a photo`);
+  }
+  return r;
 }
 
 /**
@@ -329,10 +478,11 @@ const MCP_PHOTO_MAX_BYTES = Number(process.env.MCP_PHOTO_MAX_BYTES ?? 200_000);
  * picture reaches the conversation. The secret already in the path is what
  * guards it.
  */
-export function photoUrl(
+export function fileUrl(
   db: Database.Database,
   chatId: number,
-  messageId: number
+  messageId: number,
+  ext = "jpg"
 ): string | null {
   const base = (process.env.MCP_PUBLIC_URL ?? "").replace(/\/+$/, "");
   if (!base) return null;
@@ -347,7 +497,52 @@ export function photoUrl(
        ON CONFLICT(chat_id, message_id) DO NOTHING`
     ).run(token, chatId, messageId, Math.floor(Date.now() / 1000));
   }
-  return `${base}/p/${token}.jpg`;
+  // The extension is cosmetic — the endpoint resolves the token and serves the
+  // real type — but it makes the link recognisable and saves with a sane name.
+  return `${base}/p/${token}.${ext}`;
+}
+
+export const photoUrl = (db: Database.Database, chatId: number, messageId: number) =>
+  fileUrl(db, chatId, messageId, "jpg");
+
+/**
+ * Any attachment, as a link rather than bytes. A spreadsheet or a PDF is of no
+ * use to a model as base64 — it needs somewhere to fetch it from, and so does
+ * the person reading the reply.
+ *
+ * Metadata only: the bytes are never pulled here. `getFile` confirms Telegram
+ * will still serve the file and gives its real size, and the download happens
+ * once, when someone opens the link.
+ */
+export async function fetchFile(
+  db: Database.Database,
+  chatId: number,
+  messageId: number
+): Promise<{
+  filename: string;
+  mimeType: string;
+  bytes: number;
+  message_type: string;
+  caption: string | null;
+  url: string | null;
+}> {
+  const p = pickFile(db, chatId, messageId);
+  const file = await call<{ file_path?: string; file_size?: number }>("getFile", {
+    file_id: p.fileId,
+  });
+
+  const mimeType = mimeFor(p.mime, p.name, file.file_path ?? "");
+  const ext = extFor(p.name, mimeType, file.file_path ?? "");
+
+  return {
+    filename: p.name ?? `tg-${chatId}-${messageId}.${ext}`,
+    mimeType,
+    // getFile is authoritative; the size in the update can be absent.
+    bytes: file.file_size ?? p.size ?? 0,
+    message_type: p.contentType,
+    caption: p.caption,
+    url: fileUrl(db, chatId, messageId, ext),
+  };
 }
 
 /** Resolves a short photo token back to the message it points at. */

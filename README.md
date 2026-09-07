@@ -105,6 +105,7 @@ off if one server serves both.
 | `telegram_search_messages` | always | full-text, including transcripts |
 | `telegram_find_chat` | always | resolve a name to a `chat_id` |
 | `telegram_get_photo` | `ALLOW_MEDIA=1` | a photo, as a link and/or bytes |
+| `telegram_get_file` | `ALLOW_MEDIA=1` | any attachment — PDF, xlsx, docx, video, audio — as a link |
 | `telegram_send_message` | `ALLOW_SEND=1` | **sends as you** |
 | `telegram_edit_message` | `ALLOW_SEND=1` | rewrites one of your own |
 | `telegram_mark_read` | `ALLOW_SEND=1` | clears an unread badge |
@@ -118,6 +119,21 @@ A fresh install is a **read-only archive**. `ALLOW_SEND=1` enables the
 Both are off by default because the endpoint URL is effectively the credential,
 and a leaked read-only URL is a very different incident from one that can write
 to your contacts.
+
+### Attachments
+
+`telegram_get_file` returns whatever a message carries — spreadsheet, PDF,
+document, video, audio, voice, sticker — as a filename, MIME type, size and a
+link this server serves. Receive only: nothing is ever uploaded to Telegram.
+
+The bytes are not pulled when the tool is called, only when someone opens the
+link, so asking about a 15 MB file costs one API round trip. The link carries a
+short opaque token rather than the endpoint secret, and the response sets the
+real MIME type with an RFC 5987 filename, so a non-Latin name survives the
+download and a browser plays or previews what it can.
+
+**Telegram refuses to serve any file over 20 MB to a bot**, so those cannot be
+fetched at all — the tool says so instead of failing obscurely.
 
 ### Sending
 

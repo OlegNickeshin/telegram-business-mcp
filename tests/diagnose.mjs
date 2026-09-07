@@ -83,6 +83,7 @@ for (const want of TOOLS) {
 // endpoint must agree with what the server actually exposes.
 const OPTIONAL = [
   "telegram_get_photo",
+  "telegram_get_file",
   "telegram_send_message",
   "telegram_edit_message",
   "telegram_mark_read",
@@ -94,12 +95,23 @@ const WRITERS = ["telegram_send_message", "telegram_edit_message", "telegram_mar
 const extra = names.filter((n) => !TOOLS.includes(n) && !OPTIONAL.includes(n));
 extra.length === 0 ? ok("no unexpected tools") : bad(`unexpected tools: ${extra.join(", ")}`);
 
-const health = await (await fetch(new URL("/tg-mcp/healthz", bare))).json().catch(() => null);
+// Behind Caddy the /tg-mcp prefix is stripped before it reaches the server, so
+// the probe has to work with and without it — otherwise a direct run against
+// 127.0.0.1 gets a 404 body and no health check at all.
+const health = await (async () => {
+  for (const path of ["/tg-mcp/healthz", "/healthz"]) {
+    const r = await fetch(new URL(path, bare)).then((x) => x.json()).catch(() => null);
+    if (r && Array.isArray(r.tools)) return r;
+  }
+  return null;
+})();
 if (health) {
   const same = JSON.stringify([...health.tools].sort()) === JSON.stringify([...names].sort());
   same ? ok(`healthz agrees with tools/list (${names.length} tools)`)
        : bad(`healthz lists ${health.tools.join(",")} but tools/list has ${names.join(",")}`);
   ok(`send=${health.can_send ? "ENABLED" : "off"} media=${health.can_fetch_media ? "on" : "off"}`);
+} else {
+  bad("healthz did not answer with a tool list");
 }
 
 const writey = names.filter((n) => /send|delete|edit|write|post|reply|forget|mark/i.test(n));

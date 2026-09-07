@@ -15,7 +15,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { migrate, openDb } from "./db.js";
 import { enabledToolNames, runTool } from "./tools.js";
-import { ALLOW_MEDIA, ALLOW_SEND, fetchPhotoRaw, photoByToken } from "./actions.js";
+import { ALLOW_MEDIA, ALLOW_SEND, fetchFileRaw, photoByToken } from "./actions.js";
 import { createMcpServer } from "./mcp-factory.js";
 
 const PORT = Number(process.env.MCP_HTTP_PORT ?? 8124);
@@ -72,6 +72,28 @@ function setCors(res: http.ServerResponse): void {
   res.setHeader("access-control-max-age", "86400");
 }
 
+/**
+ * A Content-Disposition a browser will honour for a non-ASCII filename.
+ *
+ * The bare `filename=` parameter is ASCII-only, and JS `\w` is ASCII-only too,
+ * so sanitising a Cyrillic name against it leaves a row of underscores. RFC 5987
+ * `filename*` carries the real name; the plain parameter stays as a fallback for
+ * anything that ignores it.
+ */
+function contentDisposition(filename: string, inline: boolean): string {
+  const cleaned = filename
+    .replace(/[^\x20-\x7e]+/g, "_")
+    .replace(/["\\]/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^[_\s]+/, "");
+  // A name that was entirely non-ASCII leaves nothing but the extension.
+  const ascii = /^[^.]/.test(cleaned) ? cleaned : `file${cleaned}`;
+  const encoded = encodeURIComponent(filename).replace(/['()*]/g, (c) =>
+    "%" + c.charCodeAt(0).toString(16).toUpperCase()
+  );
+  return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 function send(res: http.ServerResponse, code: number, body: unknown): void {
   const json = JSON.stringify(body);
   res.writeHead(code, {
@@ -107,23 +129,32 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // Image bytes over plain HTTPS, addressed by a short opaque token. The master
+  // File bytes over plain HTTPS, addressed by a short opaque token. The master
   // secret deliberately stays out of this URL: it ends up in a chat client's
   // history, and a long high-entropy path is the exact shape of an
   // exfiltration link that such clients suppress.
-  const img = url.pathname.match(/^\/p\/([0-9a-f]{8,32})(?:\.\w+)?$/);
-  if (req.method === "GET" && img) {
-    const ref = photoByToken(db, img[1]);
-    if (!ref) return send(res, 404, { error: "unknown photo" });
+  const link = url.pathname.match(/^\/p\/([0-9a-f]{8,32})(?:\.\w+)?$/);
+  if (req.method === "GET" && link) {
+    const ref = photoByToken(db, link[1]);
+    if (!ref) return send(res, 404, { error: "unknown file token" });
     try {
-      const photo = await fetchPhotoRaw(db, ref.chatId, ref.messageId, IMG_MAX_BYTES);
+      // Photos get a byte budget because Telegram offers sizes to choose from;
+      // every other attachment is a single file and is served as it is.
+      const f = await fetchFileRaw(db, ref.chatId, ref.messageId, IMG_MAX_BYTES);
+      // Anything a browser can render or play opens in place; the rest saves.
+      const inline =
+        /^(image|video|audio)\//.test(f.mimeType) ||
+        f.mimeType === "application/pdf" ||
+        f.mimeType === "text/plain";
       res.writeHead(200, {
-        "content-type": photo.mimeType,
-        "content-length": photo.buf.length,
-        // Immutable: a Telegram message's photo never changes.
+        "content-type": f.mimeType,
+        "content-length": f.buf.length,
+        // Let a browser show what it can and save the rest under its real name.
+        "content-disposition": contentDisposition(f.filename, inline),
+        // Immutable: the file behind a Telegram message never changes.
         "cache-control": "private, max-age=86400",
       });
-      return res.end(photo.buf);
+      return res.end(f.buf);
     } catch (err) {
       return send(res, 404, { error: (err as Error).message });
     }
