@@ -184,7 +184,13 @@ function toTgMessage(
  * Imported rows must carry the same connection id as live ones for that chat,
  * or the UNIQUE key differs and the same message is stored twice.
  */
-function connectionFor(db: Database.Database, chatId: number): string {
+function connectionFor(db: Database.Database, chatId: number, type: string): string {
+  // A group can never have one: a business connection covers the owner's 1:1
+  // chats, and Telegram refuses a send that carries the field into a group
+  // ("chat must be a private chat"). Stamping one on during an import made
+  // sending to that group impossible until the rows were repaired.
+  if (botApiChatType(type) !== "private") return "";
+
   const fromChat = db
     .prepare(
       `SELECT business_connection_id AS bc FROM messages
@@ -228,7 +234,7 @@ function main(): void {
     }
     const chatId = botApiChatId(chat.id, chat.type);
     const messages = chat.messages ?? [];
-    const connectionId = connectionFor(db, chatId);
+    const connectionId = connectionFor(db, chatId, chat.type ?? "");
     const before = db
       .prepare("SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?")
       .get(chatId) as { n: number };

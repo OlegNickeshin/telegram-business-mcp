@@ -59,6 +59,11 @@ function knownChat(db: Database.Database, chatId: number): ChatRow {
   if (row.type === "private" && !row.business_connection_id) {
     throw new Error(`chat_id ${chatId} has no business connection recorded`);
   }
+  // Ignore one that should not be there. Rows can arrive from an import, and a
+  // connection id on a group turns every send into a 400 from Telegram.
+  if (row.type !== "private" && row.business_connection_id) {
+    return { ...row, business_connection_id: null };
+  }
   return row;
 }
 
