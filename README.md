@@ -382,6 +382,7 @@ directly produces the same `chat.id` as their business chat but an independent
   `MCP_INLINE_IMAGE=1` for clients that support it.
 * Photos are not OCR'd; video is not transcribed by default.
 * Sending is text only — no media, and no way to target a specific forum topic.
+  Formatting is converted; attachments are not sent.
   Receiving is unaffected: metadata for every attachment, contents for the
   formats listed above.
 * The archive grows without bound unless you use `telegram_forget`.
@@ -421,10 +422,21 @@ JavaScript already is — so the numbers work directly, and must not be
 bare: the address already *is* the visible text, so marking it up adds noise
 and loses nothing.
 
-Sending is unaffected and stays literal — no `parse_mode`. Telegram's
-MarkdownV2 requires escaping over a dozen characters, so a stray `_` or `.` in
-a model's reply would fail the whole send. An unformatted message beats an
-unsent one.
+Sending converts the other way. A model asked to reply writes markdown whether
+or not anyone wanted it, so `**bold**` used to reach a real person as four
+literal asterisks. Markdown is now converted to Telegram **HTML** — bold,
+italic, underline, strikethrough, spoiler, code, fenced blocks, links, quotes;
+headings become bold and bullets become `•`, since Telegram has neither.
+
+HTML rather than MarkdownV2 because MarkdownV2 needs eighteen characters
+escaped and HTML needs three, and one unescaped `_` fails the entire send. Text
+with no markdown in it is sent plain and untouched, and a parse rejection
+retries once with the markup stripped: formatting is a nicety, but a message
+that never arrives is a real failure in someone's conversation.
+
+`_italic_` is deliberately not recognised. Underscores inside words are
+ordinary in filenames and identifiers, and treating them as markup would mangle
+real text far more often than it would italicise anything.
 
 * **Dedup** — `updates.update_id` is a primary key and `messages` is unique on
   `(business_connection_id, chat_id, message_id)`. Both matter: Telegram

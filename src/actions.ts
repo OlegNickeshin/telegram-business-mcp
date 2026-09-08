@@ -10,6 +10,7 @@
 import type Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
 import { EXTRACT_MAX_BYTES, extractText, isExtractable } from "./extract.js";
+import { stripMarkdown, toTelegramHtml } from "./markdown.js";
 import { call, contentType, type TgMessage } from "./telegram.js";
 import { saveBusinessMessage } from "./store.js";
 import { displayName } from "./queries.js";
@@ -61,6 +62,37 @@ function knownChat(db: Database.Database, chatId: number): ChatRow {
   return row;
 }
 
+/**
+ * Sends text as Telegram HTML when it carries markdown, and as plain text when
+ * it does not.
+ *
+ * The fallback matters more than the conversion. Formatting is a nicety; a
+ * message that never arrives because a bracket confused a parser is a real
+ * failure in someone's actual conversation. So a parse rejection retries once
+ * with the markup stripped, and only a second failure is an error.
+ */
+async function sendWithFormatting(
+  base: Record<string, unknown>,
+  body: string,
+  method = "sendMessage"
+): Promise<TgMessage> {
+  const { html, formatted } = toTelegramHtml(body);
+  if (!formatted) return call<TgMessage>(method, { ...base, text: body });
+
+  try {
+    return await call<TgMessage>(method, { ...base, text: html, parse_mode: "HTML" });
+  } catch (err) {
+    const msg = (err as Error).message;
+    // Telegram reports a bad parse as a 400 naming entities or the parse mode.
+    if (!/can't parse|entit|parse_mode|unsupported start tag/i.test(msg)) throw err;
+    const plain = stripMarkdown(body);
+    console.warn(
+      `${new Date().toISOString()} HTML rejected (${msg}); resending without formatting`
+    );
+    return call<TgMessage>(method, { ...base, text: plain });
+  }
+}
+
 export async function sendMessage(
   db: Database.Database,
   chatId: number,
@@ -77,16 +109,16 @@ export async function sendMessage(
   }
 
   const chat = knownChat(db, chatId);
-  const sent = await call<TgMessage>("sendMessage", {
+  const base = {
     // Omitted for groups: the field is only valid for business chats.
     ...(chat.business_connection_id
       ? { business_connection_id: chat.business_connection_id }
       : {}),
     chat_id: chatId,
-    text: body,
     ...(threadId ? { message_thread_id: threadId } : {}),
     ...(replyTo ? { reply_parameters: { message_id: replyTo } } : {}),
-  });
+  };
+  const sent = await sendWithFormatting(base, body);
 
   // Record it ourselves so history and the Linear mirror stay complete even if
   // Telegram does not echo our own send back as an update. The unique index on
@@ -172,12 +204,17 @@ export async function editMessage(
     throw new Error(`message ${messageId} was received, not sent — only your own messages can be edited`);
   }
 
-  await call("editMessageText", {
-    ...(row.business_connection_id ? { business_connection_id: row.business_connection_id } : {}),
-    chat_id: chatId,
-    message_id: messageId,
-    text: body,
-  });
+  await sendWithFormatting(
+    {
+      ...(row.business_connection_id
+        ? { business_connection_id: row.business_connection_id }
+        : {}),
+      chat_id: chatId,
+      message_id: messageId,
+    },
+    body,
+    "editMessageText"
+  );
 
   const now = Math.floor(Date.now() / 1000);
   db.prepare("UPDATE messages SET text = ?, edit_date = ?, edited_at = ? WHERE chat_id = ? AND message_id = ?")
