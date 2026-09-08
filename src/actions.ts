@@ -153,6 +153,161 @@ export async function sendMessage(
   };
 }
 
+/** Bot API method and the field the file goes in, per kind of media. */
+const SEND_METHOD: Record<string, [method: string, field: string]> = {
+  photo: ["sendPhoto", "photo"],
+  document: ["sendDocument", "document"],
+  video: ["sendVideo", "video"],
+  audio: ["sendAudio", "audio"],
+  voice: ["sendVoice", "voice"],
+  video_note: ["sendVideoNote", "video_note"],
+  animation: ["sendAnimation", "animation"],
+  sticker: ["sendSticker", "sticker"],
+};
+
+/** Best guess at what a URL points to, when there is no archived message. */
+function kindFromUrl(url: string): string {
+  const ext = url.split(/[?#]/)[0].match(/\.([A-Za-z0-9]{1,8})$/)?.[1]?.toLowerCase() ?? "";
+  if (["jpg", "jpeg", "png", "webp", "bmp"].includes(ext)) return "photo";
+  if (["gif"].includes(ext)) return "animation";
+  if (["mp4", "mov", "webm", "m4v"].includes(ext)) return "video";
+  if (["mp3", "m4a", "flac", "wav"].includes(ext)) return "audio";
+  if (["oga", "ogg", "opus"].includes(ext)) return "voice";
+  // Anything unrecognised goes as a document, which is also the only kind
+  // Telegram passes through without re-encoding.
+  return "document";
+}
+
+/**
+ * Sends media: a file already in the archive, or one at a public URL.
+ *
+ * Resending from the archive costs no bandwidth in either direction — the
+ * `file_id` is a handle to a file Telegram already stores, so it is quoted back
+ * rather than uploaded. That also means it works for anything the archive saw
+ * live, however large, without the 20 MB download cap applying.
+ *
+ * A URL is fetched by Telegram, not by this server. Imported history has no
+ * `file_id` at all, so those messages say so instead of failing obscurely.
+ */
+export async function sendMedia(
+  db: Database.Database,
+  opts: {
+    chatId: number;
+    fromChatId?: number;
+    fromMessageId?: number;
+    url?: string;
+    caption?: string;
+    asDocument?: boolean;
+    replyTo?: number;
+    threadId?: number;
+  }
+): Promise<unknown> {
+  if (!ALLOW_SEND) throw new Error("Sending is disabled on this server (ALLOW_SEND=0)");
+
+  const hasSource = opts.fromChatId != null && opts.fromMessageId != null;
+  if (hasSource === (opts.url != null)) {
+    throw new Error(
+      "give exactly one source: from_chat_id + from_message_id (a message in the " +
+        "archive), or url (a public link Telegram can fetch)"
+    );
+  }
+
+  let kind: string;
+  let file: string;
+  let sourceName: string | null = null;
+
+  if (hasSource) {
+    const found = locateFile(db, opts.fromChatId!, opts.fromMessageId!);
+    if (!found.fileId) {
+      throw new Error(
+        `message ${opts.fromMessageId} carries no file. Imported history has no ` +
+          `file_id — only messages the collector saw live can be resent.`
+      );
+    }
+    kind = found.contentType;
+    file = found.fileId;
+    sourceName = found.name ?? null;
+  } else {
+    kind = kindFromUrl(opts.url!);
+    file = opts.url!;
+  }
+
+  // Forcing a document keeps a photo at full resolution and stops Telegram
+  // re-encoding anything.
+  if (opts.asDocument) kind = "document";
+
+  const entry = SEND_METHOD[kind];
+  if (!entry) throw new Error(`cannot send a ${kind}`);
+  const [method, field] = entry;
+
+  const chat = knownChat(db, opts.chatId);
+  const caption = String(opts.caption ?? "").trim();
+  const { html, formatted } = caption ? toTelegramHtml(caption) : { html: "", formatted: false };
+
+  const params: Record<string, unknown> = {
+    ...(chat.business_connection_id
+      ? { business_connection_id: chat.business_connection_id }
+      : {}),
+    chat_id: opts.chatId,
+    [field]: file,
+    // A sticker or a video note has no caption field at all.
+    ...(caption && kind !== "sticker" && kind !== "video_note"
+      ? { caption: html, ...(formatted ? { parse_mode: "HTML" } : {}) }
+      : {}),
+    ...(opts.threadId ? { message_thread_id: opts.threadId } : {}),
+    ...(opts.replyTo ? { reply_parameters: { message_id: opts.replyTo } } : {}),
+  };
+
+  let sent: TgMessage;
+  try {
+    sent = await call<TgMessage>(method, params);
+  } catch (err) {
+    const msg = (err as Error).message;
+    // Same reasoning as for text: a caption is a nicety, delivery is not.
+    if (formatted && /can't parse|entit|parse_mode|unsupported start tag/i.test(msg)) {
+      console.warn(
+        `${new Date().toISOString()} caption HTML rejected (${msg}); resending plain`
+      );
+      sent = await call<TgMessage>(method, {
+        ...params,
+        caption: stripMarkdown(caption),
+        parse_mode: undefined,
+      });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    saveBusinessMessage(
+      db,
+      { ...sent, business_connection_id: chat.business_connection_id ?? "" },
+      0
+    );
+  } catch {
+    /* archiving is best-effort; the media was already delivered */
+  }
+
+  console.log(
+    `${new Date().toISOString()} SENT ${kind} to chat_id=${opts.chatId} ` +
+      `(${displayName(chat)}) message_id=${sent.message_id}` +
+      (hasSource ? ` from ${opts.fromChatId}/${opts.fromMessageId}` : ` from url`)
+  );
+
+  return {
+    sent: true,
+    kind,
+    chat_id: opts.chatId,
+    chat_name: displayName(chat),
+    message_id: sent.message_id,
+    filename: sourceName,
+    caption: caption || null,
+    // A group send goes out as the bot: a business connection covers 1:1 chats
+    // only, so there is no way to post as the owner there.
+    sent_as: chat.business_connection_id ? "you" : "the bot",
+  };
+}
+
 /**
  * Marks a message, and everything before it in that chat, as read. Invisible to
  * the other side beyond the read receipt they would have seen anyway.
@@ -410,7 +565,23 @@ function pickFile(
   maxBytes?: number
 ): PickedFile {
   if (!ALLOW_MEDIA) throw new Error("Media fetching is disabled on this server (ALLOW_MEDIA=0)");
+  return locateFile(db, chatId, messageId, maxBytes);
+}
 
+/**
+ * The same lookup without the ALLOW_MEDIA gate, for callers that never read the
+ * bytes.
+ *
+ * Resending an archived file quotes its `file_id` back to Telegram, which
+ * already holds the file — nothing is downloaded, and nothing leaves this
+ * server. That is a send, governed by ALLOW_SEND, not a media read.
+ */
+function locateFile(
+  db: Database.Database,
+  chatId: number,
+  messageId: number,
+  maxBytes?: number
+): PickedFile {
   const row = db
     .prepare("SELECT raw, caption, content_type FROM messages WHERE chat_id = ? AND message_id = ?")
     .get(chatId, messageId) as
@@ -452,7 +623,17 @@ function pickFile(
   }
 
   if (!fileId) {
-    throw new Error(`message ${messageId} is a ${row.content_type} and carries no file`);
+    // Distinguish "no media at all" from "media the archive knows about but
+    // cannot address" — the second is imported history, and saying so is the
+    // difference between an actionable answer and a shrug.
+    const isMedia = row.content_type !== "text" && row.content_type !== "other";
+    throw new Error(
+      isMedia
+        ? `message ${messageId} is a ${row.content_type}, but carries no file_id: it came ` +
+          `from a Telegram Desktop import, and an export does not include one. Only ` +
+          `messages the collector saw live can be fetched or resent.`
+        : `message ${messageId} is a ${row.content_type} and carries no file`
+    );
   }
   // Refuse before spending a round trip on something Telegram will not serve.
   if (size != null && size > TELEGRAM_FILE_LIMIT) {

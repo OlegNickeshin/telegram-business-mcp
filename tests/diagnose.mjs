@@ -85,13 +85,20 @@ const OPTIONAL = [
   "telegram_get_photo",
   "telegram_get_file",
   "telegram_send_message",
+  "telegram_send_media",
   "telegram_edit_message",
   "telegram_mark_read",
   "telegram_forget",
 ];
 // Tools that legitimately change something. Anything else matching /send|delete|…/
 // is unexpected and must be reported.
-const WRITERS = ["telegram_send_message", "telegram_edit_message", "telegram_mark_read", "telegram_forget"];
+const WRITERS = [
+  "telegram_send_message",
+  "telegram_send_media",
+  "telegram_edit_message",
+  "telegram_mark_read",
+  "telegram_forget",
+];
 const extra = names.filter((n) => !TOOLS.includes(n) && !OPTIONAL.includes(n));
 extra.length === 0 ? ok("no unexpected tools") : bad(`unexpected tools: ${extra.join(", ")}`);
 

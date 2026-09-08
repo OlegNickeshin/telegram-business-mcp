@@ -8,7 +8,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ALLOW_FORGET, ALLOW_MEDIA, ALLOW_SEND } from "./actions.js";
-import { EDIT_TOOL, FILE_TOOL, FORGET_TOOL, MEDIA_TOOL, READ_TOOL, SEND_TOOL } from "./tools.js";
+import {
+  EDIT_TOOL,
+  FILE_TOOL,
+  FORGET_TOOL,
+  MEDIA_TOOL,
+  READ_TOOL,
+  SEND_MEDIA_TOOL,
+  SEND_TOOL,
+} from "./tools.js";
 
 export type ToolArgs = Record<string, unknown>;
 export type ToolCaller = (name: string, args: ToolArgs) => Promise<unknown>;
@@ -75,9 +83,11 @@ export function createMcpServer(call: ToolCaller): McpServer {
         "call telegram_find_chat to resolve the name to a chat_id, then telegram_get_messages " +
         "with that chat_id. Voice messages carry a `transcript` field. " +
         (ALLOW_SEND
-          ? "telegram_send_message sends a real message to a real person as the user — always " +
-            "show the exact text and the recipient's name and get explicit confirmation before " +
-            "calling it, and never call it twice for one request. Nothing else here mutates."
+          ? "telegram_send_message and telegram_send_media reach real people as the user — " +
+            "always show the exact text or what is being sent, and the recipient's name, and " +
+            "get explicit confirmation before calling either, and never call one twice for a " +
+            "single request. In a group there is no business connection, so a send goes out " +
+            "as the bot rather than as the user; say so when it matters. Nothing else mutates."
           : "This server cannot send, edit or delete anything."),
     }
   );
@@ -363,6 +373,49 @@ export function createMcpServer(call: ToolCaller): McpServer {
         },
       },
       async (args) => json(await call(SEND_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      SEND_MEDIA_TOOL,
+      {
+        title: "Send a photo or file to Telegram",
+        description:
+          "Send a photo, document, video, audio or voice message to a real person or group " +
+          "from the user's Telegram. Irreversible and immediately visible — confirm the " +
+          "recipient and what is being sent before calling.\n\n" +
+          "Give exactly one source:\n" +
+          "• from_chat_id + from_message_id — forward a file that is already in the archive. " +
+          "Costs no upload and has no size limit, because Telegram already holds the file. " +
+          "Works only for messages the collector saw live; imported history has no file id.\n" +
+          "• url — a public http(s) link that Telegram fetches itself.\n\n" +
+          "In a private chat this is sent as the user. In a group there is no business " +
+          "connection, so it is sent as the bot — say so if that matters.",
+        inputSchema: {
+          chat_id: z.number().int().describe("Where to send it, from telegram_find_chat."),
+          from_chat_id: z.number().int().optional()
+            .describe("Chat holding the file to resend."),
+          from_message_id: z.number().int().optional()
+            .describe("message_id of the message holding the file."),
+          url: z.string().optional()
+            .describe("Public http(s) link for Telegram to fetch, instead of from_*."),
+          caption: z.string().max(1024).optional()
+            .describe("Text under the media. Markdown is converted."),
+          as_document: z.boolean().optional()
+            .describe("Send as a file rather than a photo/video, keeping full quality."),
+          reply_to_message_id: z.number().int().optional()
+            .describe("Quote this message_id."),
+          message_thread_id: z.number().int().optional()
+            .describe("Forum topic to post into, in a group that has them."),
+        },
+        annotations: {
+          title: "Send a photo or file to Telegram",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
+      async (args) => json(await call(SEND_MEDIA_TOOL, args as Args))
     );
 
     server.registerTool(

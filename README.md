@@ -113,6 +113,7 @@ off if one server serves both.
 | `telegram_get_photo` | `ALLOW_MEDIA=1` | a photo, as a link and/or bytes |
 | `telegram_get_file` | `ALLOW_MEDIA=1` | **reads** an attachment — xlsx, docx, PDF, text — plus a link for the rest |
 | `telegram_send_message` | `ALLOW_SEND=1` | **sends as you** |
+| `telegram_send_media` | `ALLOW_SEND=1` | **sends a photo or file as you** — private chats and groups |
 | `telegram_edit_message` | `ALLOW_SEND=1` | rewrites one of your own |
 | `telegram_mark_read` | `ALLOW_SEND=1` | clears an unread badge |
 | `telegram_forget` | `ALLOW_FORGET=1` | **deletes from the local archive** |
@@ -187,6 +188,26 @@ sees it from you, not from a bot.
 * Every send is logged and written back into the archive.
 * Annotated `readOnlyHint: false`, and the server's instructions tell the model
   to confirm wording and recipient first.
+
+`telegram_send_media` sends a photo, document, video, audio or voice message,
+from one of two sources:
+
+* **A file already in the archive** (`from_chat_id` + `from_message_id`).
+  Telegram already holds it, so its `file_id` is quoted back rather than
+  uploaded — no bandwidth either way, and no size limit, because nothing is
+  downloaded. Live messages only: a Desktop export carries no `file_id`, and
+  imported rows say exactly that instead of failing vaguely.
+* **A public URL** (`url`), which Telegram fetches itself.
+
+`as_document` sends a photo or video as a file, keeping full resolution and
+skipping Telegram's re-encoding. Captions go through the same markdown
+conversion as message text.
+
+Groups work, with one caveat that is Telegram's and not this project's: a
+business connection covers the owner's 1:1 chats only, so a group send goes out
+**as the bot**, not as the owner. The result says which, in `sent_as`. Passing
+a connection id into a group is what Telegram rejects with "chat must be a
+private chat".
 
 This changes what the endpoint secret is worth. Read-only, a leaked URL means
 someone read the archive; with sending on it means someone writes to your
@@ -398,8 +419,8 @@ directly produces the same `chat.id` as their business chat but an independent
   per-connector: switching it off applies to every page in that browser, not
   only this one.
 * Photos are not OCR'd; video is not transcribed by default.
-* Sending is text only — no media, and no way to target a specific forum topic.
-  Formatting is converted; attachments are not sent.
+* A group send is from the bot, not from you — Telegram Business does not
+  reach groups, so there is no way to post there as yourself.
   Receiving is unaffected: metadata for every attachment, contents for the
   formats listed above.
 * The archive grows without bound unless you use `telegram_forget`.

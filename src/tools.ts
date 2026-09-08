@@ -8,6 +8,7 @@ import {
   fetchPhoto,
   forget,
   markRead,
+  sendMedia,
   sendMessage,
 } from "./actions.js";
 import {
@@ -132,6 +133,7 @@ export const TOOL_NAMES: ToolName[] = [
 export const MEDIA_TOOL = "telegram_get_photo";
 export const FILE_TOOL = "telegram_get_file";
 export const SEND_TOOL = "telegram_send_message";
+export const SEND_MEDIA_TOOL = "telegram_send_media";
 export const EDIT_TOOL = "telegram_edit_message";
 export const READ_TOOL = "telegram_mark_read";
 export const FORGET_TOOL = "telegram_forget";
@@ -140,7 +142,7 @@ export function enabledToolNames(): string[] {
   return [
     ...TOOL_NAMES,
     ...(ALLOW_MEDIA ? [MEDIA_TOOL, FILE_TOOL] : []),
-    ...(ALLOW_SEND ? [SEND_TOOL, EDIT_TOOL, READ_TOOL] : []),
+    ...(ALLOW_SEND ? [SEND_TOOL, SEND_MEDIA_TOOL, EDIT_TOOL, READ_TOOL] : []),
     ...(ALLOW_FORGET ? [FORGET_TOOL] : []),
   ];
 }
@@ -252,6 +254,28 @@ export async function runTool(
       const replyTo =
         args.reply_to_message_id != null ? Number(args.reply_to_message_id) : undefined;
       return sendMessage(db, chatId, String(args.text ?? ""), replyTo);
+    }
+
+    case SEND_MEDIA_TOOL: {
+      if (!ALLOW_SEND) throw new Error(`${SEND_MEDIA_TOOL} is disabled on this server`);
+      const num = (v: unknown) => {
+        const n = typeof v === "string" ? Number(v) : v;
+        return typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : undefined;
+      };
+      const url = args.url != null ? String(args.url).trim() : undefined;
+      if (url && !/^https?:\/\//i.test(url)) {
+        throw new Error("url must be an http(s) link Telegram can fetch");
+      }
+      return sendMedia(db, {
+        chatId: requireChatId(args),
+        fromChatId: num(args.from_chat_id),
+        fromMessageId: num(args.from_message_id),
+        url,
+        caption: args.caption != null ? String(args.caption) : undefined,
+        asDocument: args.as_document === true,
+        replyTo: num(args.reply_to_message_id),
+        threadId: num(args.message_thread_id),
+      });
     }
 
     case EDIT_TOOL: {
