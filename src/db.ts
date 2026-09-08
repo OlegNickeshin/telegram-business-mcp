@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DB_PATH } from "./config.js";
 import { fileInfo, type TgMessage } from "./telegram.js";
+import { renderMessage } from "./format.js";
 
 export function openDb(readonly = false): Database.Database {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -36,7 +37,8 @@ export function openDb(readonly = false): Database.Database {
 
 /** Idempotent ALTER: SQLite has no ADD COLUMN IF NOT EXISTS. */
 /**
- * Fills file_name/file_size for messages stored before those columns existed.
+ * Fills file_name/file_size/text_formatted for messages stored before those
+ * columns existed.
  *
  * The values were always in `raw`, so this is a re-read rather than a loss —
  * but parsing JSON for every row on every read is not, which is why they get
@@ -44,41 +46,69 @@ export function openDb(readonly = false): Database.Database {
  * are considered, and a genuinely nameless attachment (a voice note, a sticker)
  * keeps a size, so it is not re-examined either.
  */
-function backfillFileInfo(db: Database.Database): void {
+function backfillFromRaw(db: Database.Database): void {
   // Every caller opens for writing today, but a read-only one would otherwise
   // fail here rather than simply skipping a convenience.
   if (db.readonly) return;
+
+  // A message with nothing renderable in it never gets `text_formatted` set,
+  // so without a marker it is re-parsed on every start — and "entities"
+  // appears in the raw of anything holding a URL, mention or hashtag, which is
+  // most messages eventually. The version is part of the key so that adding a
+  // column later re-runs the pass instead of being skipped by an old flag.
+  const DONE = "backfill_raw_v2";
+  const seen = db.prepare("SELECT value FROM state WHERE key = ?").get(DONE) as
+    | { value: string }
+    | undefined;
+  if (seen) return;
+  // Only rows that could still be missing something, and only those whose raw
+  // even mentions the fields — `entities` in particular is rare, so the LIKE
+  // keeps this from re-parsing every message on every start.
   const rows = db
     .prepare(
-      `SELECT id, raw FROM messages
-        WHERE content_type NOT IN ('text', 'other')
-          AND file_name IS NULL AND file_size IS NULL`
+      `SELECT id, raw, content_type FROM messages
+        WHERE (content_type NOT IN ('text', 'other') AND file_name IS NULL AND file_size IS NULL)
+           OR (text_formatted IS NULL AND raw LIKE '%entities%')`
     )
-    .all() as { id: number; raw: string }[];
-  if (!rows.length) return;
+    .all() as { id: number; raw: string; content_type: string }[];
 
-  const update = db.prepare("UPDATE messages SET file_name = ?, file_size = ? WHERE id = ?");
+  const update = db.prepare(
+    `UPDATE messages
+        SET file_name      = COALESCE(?, file_name),
+            file_size      = COALESCE(?, file_size),
+            text_formatted = COALESCE(?, text_formatted)
+      WHERE id = ?`
+  );
   let written = 0;
   let named = 0;
+  let formatted = 0;
   db.transaction(() => {
     for (const r of rows) {
-      let info: { name: string | null; size: number | null };
+      let msg: TgMessage;
       try {
-        info = fileInfo(JSON.parse(r.raw) as TgMessage);
+        msg = JSON.parse(r.raw) as TgMessage;
       } catch {
         // A row whose raw will not parse is not worth failing a startup over.
         // Deliberately narrow: a failing UPDATE must not be swallowed here.
         continue;
       }
-      if (info.name == null && info.size == null) continue;
-      written += update.run(info.name, info.size, r.id).changes;
+      const info = fileInfo(msg);
+      const rendered = renderMessage(msg);
+      if (info.name == null && info.size == null && rendered == null) continue;
+      written += update.run(info.name, info.size, rendered, r.id).changes;
       if (info.name) named++;
+      if (rendered) formatted++;
     }
   })();
   // Report what was written, not what was looked at — the difference is the
   // whole signal when something is quietly not persisting.
+  db.prepare("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)").run(
+    DONE,
+    String(Math.floor(Date.now() / 1000))
+  );
   console.log(
-    `[db] attachment details: ${written} of ${rows.length} messages updated (${named} named)`
+    `[db] backfill: ${written} of ${rows.length} rows updated ` +
+      `(${named} named files, ${formatted} with formatting)`
   );
 }
 
@@ -247,7 +277,12 @@ export function migrate(db: Database.Database): void {
   // So the message list can name the attachment instead of just typing it.
   addColumn(db, "messages", "file_name", "TEXT");
   addColumn(db, "messages", "file_size", "INTEGER");
-  backfillFileInfo(db);
+  // Formatting rendered from `entities`. Kept out of `text` so that the FTS
+  // index stays on the plain words: searching for "тут" must not be defeated
+  // by it having become "[тут](https://…)".
+  addColumn(db, "messages", "text_formatted", "TEXT");
+  backfillFromRaw(db);
+
 
   addColumn(db, "messages", "message_thread_id", "INTEGER");
   addColumn(db, "messages", "topic_name", "TEXT");

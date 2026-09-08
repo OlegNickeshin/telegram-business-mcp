@@ -389,14 +389,42 @@ directly produces the same `chat.id` as their business chat but an independent
 ## Data model
 
 `messages` keeps `chat_id`, `message_id`, `business_connection_id`, sender
-fields, `date`, `text`, `caption`, `content_type`, `file_name`, `file_size`,
-`message_thread_id`, `topic_name`, plus `outgoing`, `edit_date`, `is_deleted`,
-`transcript` and the raw update JSON.
+fields, `date`, `text`, `caption`, `text_formatted`, `content_type`,
+`file_name`, `file_size`, `message_thread_id`, `topic_name`, plus `outgoing`,
+`edit_date`, `is_deleted`, `transcript` and the raw update JSON.
 
-`file_name` and `file_size` are duplicated out of the raw JSON on purpose: the
-values were always in there, but parsing every row's JSON on every read is not
-worth it to name a document. Columns added later are backfilled from `raw` at
-startup, once.
+`file_name`, `file_size` and `text_formatted` are duplicated out of the raw
+JSON on purpose: the values were always in there, but parsing every row's JSON
+on every read is not worth it to name a document. Columns added later are
+backfilled from `raw` at startup, once — the pass records a versioned marker in
+`state`, so it neither repeats nor gets skipped when a later column needs it.
+
+`text_formatted` is kept separate from `text` rather than replacing it, so the
+FTS index stays on the plain words: a search for a word must not be defeated by
+it having become `[word](https://…)`.
+
+### Formatting
+
+Telegram sends formatting out of band — `text` is plain and a parallel
+`entities` array says which ranges are bold or link somewhere. Storing only the
+text is harmless for bold, and silently destructive for `text_link`, where the
+anchor is shown and the URL exists *only* in the entity: a reader sees "look
+here" with no way to know where "here" pointed.
+
+`entities` are rendered back to markdown, so bold, italic, code, quotes and
+links survive into `text`, and `text_source` says when that happened. Entity
+offsets are UTF-16 code units rather than characters, which a string in
+JavaScript already is — so the numbers work directly, and must not be
+"corrected" to iterate code points.
+
+`url`, `mention`, `email`, `phone_number` and `hashtag` are deliberately left
+bare: the address already *is* the visible text, so marking it up adds noise
+and loses nothing.
+
+Sending is unaffected and stays literal — no `parse_mode`. Telegram's
+MarkdownV2 requires escaping over a dozen characters, so a stray `_` or `.` in
+a model's reply would fail the whole send. An unformatted message beats an
+unsent one.
 
 * **Dedup** — `updates.update_id` is a primary key and `messages` is unique on
   `(business_connection_id, chat_id, message_id)`. Both matter: Telegram

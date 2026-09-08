@@ -43,6 +43,18 @@ function chatOut(c: ChatRow) {
 }
 
 function msgOut(m: MessageRow) {
+  // Where the words came from, and whether markdown was reconstructed from
+  // Telegram's entities. Captions carry formatting as often as text does, so
+  // this has to be worked out once rather than branched per field.
+  const origin =
+    m.text != null
+      ? "written"
+      : m.caption != null
+        ? "caption"
+        : m.transcript != null
+          ? `speech transcribed from ${m.content_type}`
+          : null;
+
   return {
     chat_id: m.chat_id,
     chat_name: displayName({
@@ -84,15 +96,11 @@ function msgOut(m: MessageRow) {
     // null while the words sat in `transcript` — and a reader that checks one
     // field concludes nothing was said. Fall back, and say where it came from
     // so speech is never quoted as if it had been typed.
-    text: m.text ?? m.caption ?? m.transcript ?? null,
+    text: m.text_formatted ?? m.text ?? m.caption ?? m.transcript ?? null,
     text_source:
-      m.text != null
-        ? "written"
-        : m.caption != null
-          ? "caption"
-          : m.transcript != null
-            ? `speech transcribed from ${m.content_type}`
-            : null,
+      origin && m.text_formatted != null
+        ? `${origin}, markdown rendered from Telegram formatting`
+        : origin,
     // Speech recognised locally from voice/video. Null until transcribed.
     transcript: m.transcript,
     transcript_engine: m.transcript_engine,

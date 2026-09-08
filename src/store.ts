@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { renderMessage } from "./format.js";
 import {
   contentType,
   fileInfo,
@@ -168,12 +169,12 @@ export function saveBusinessMessage(
          (business_connection_id, chat_id, message_id, update_id, from_id, from_is_bot,
           from_first_name, from_last_name, from_username, outgoing, date, edit_date,
           text, caption, content_type, reply_to_message_id, forward_origin, raw, created_at,
-          message_thread_id, topic_name, file_name, file_size)
+          message_thread_id, topic_name, file_name, file_size, text_formatted)
        VALUES
          (@bc, @chat_id, @message_id, @update_id, @from_id, @from_is_bot,
           @from_first_name, @from_last_name, @from_username, @outgoing, @date, @edit_date,
           @text, @caption, @content_type, @reply_to, @forward_origin, @raw, @created_at,
-          @thread_id, @topic_name, @file_name, @file_size)
+          @thread_id, @topic_name, @file_name, @file_size, @text_formatted)
        ON CONFLICT (business_connection_id, chat_id, message_id) DO NOTHING`
     )
     .run({
@@ -194,6 +195,7 @@ export function saveBusinessMessage(
       content_type: contentType(msg),
       file_name: fileInfo(msg).name,
       file_size: fileInfo(msg).size,
+      text_formatted: renderMessage(msg),
       thread_id: msg.message_thread_id ?? null,
       topic_name: topicName,
       reply_to: msg.reply_to_message?.message_id ?? null,
@@ -227,7 +229,8 @@ export function saveEditedBusinessMessage(
       `UPDATE messages
           SET text = @text, caption = @caption, edit_date = @edit_date,
               content_type = @content_type, edited_at = @edited_at, raw = @raw,
-              file_name = @file_name, file_size = @file_size
+              file_name = @file_name, file_size = @file_size,
+              text_formatted = @text_formatted
         WHERE business_connection_id = @bc AND chat_id = @chat_id AND message_id = @message_id`
     )
     .run({
@@ -240,6 +243,7 @@ export function saveEditedBusinessMessage(
       content_type: contentType(msg),
       file_name: fileInfo(msg).name,
       file_size: fileInfo(msg).size,
+      text_formatted: renderMessage(msg),
       edited_at: now(),
       raw: JSON.stringify(msg),
     });
