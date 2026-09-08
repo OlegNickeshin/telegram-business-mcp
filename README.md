@@ -413,11 +413,21 @@ directly produces the same `chat.id` as their business chat but an independent
   stays out of it. Claude renders the inline image block fine — set
   `MCP_INLINE_IMAGE=1` for clients that support it.
 
-  **Turning CSP off makes them work.** With Content-Security-Policy disabled on
-  the client, photos do render in ChatGPT. So the block was never server-side —
-  it was the browser enforcing the page's policy. Note that CSP is not
-  per-connector: switching it off applies to every page in that browser, not
-  only this one.
+  **The cause was a missing widget CSP, and it is now declared.** With
+  Content-Security-Policy switched off on the client, photos render — which
+  located the problem exactly. An Apps SDK widget runs in a sandboxed iframe
+  under a default policy and may only load assets from origins it declares, and
+  this one declared none, so the iframe was refusing to fetch the image.
+
+  The resource now ships `_meta.ui.csp` and `openai/widgetCSP` naming the origin
+  from `MCP_PUBLIC_URL`, in both spellings, since clients differ over which they
+  read. `ui.domain` is left unset on purpose: it assigns a dedicated origin and
+  is only required to submit an app to OpenAI's directory, and a private
+  connector runs on the shared sandbox. ChatGPT's app validator flags both as
+  warnings; only the CSP one affected rendering.
+
+  Refresh the connector after upgrading — a client caches the tool and resource
+  list, so the new metadata is not picked up until it re-reads them.
 * Photos are not OCR'd; video is not transcribed by default.
 * A group send is from the bot, not from you — Telegram Business does not
   reach groups, so there is no way to post there as yourself.

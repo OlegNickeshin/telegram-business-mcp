@@ -70,6 +70,43 @@ const PHOTO_WIDGET_HTML = `<!DOCTYPE html>
   window.addEventListener("openai:set_globals", render);
 </script>`;
 
+/**
+ * The origin this server hands out photo links on.
+ *
+ * A widget runs in a sandboxed iframe under a default Content-Security-Policy,
+ * so it may only load assets from origins it declares. Declaring nothing was
+ * why the picture never appeared: the iframe was refusing to fetch it, which is
+ * also why switching CSP off in the browser made it work. Naming the origin
+ * here is the fix that needs no such trade.
+ */
+function publicOrigin(): string | null {
+  const raw = (process.env.MCP_PUBLIC_URL ?? "").trim();
+  if (!raw) return null;
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Widget metadata for the resource that serves the HTML.
+ *
+ * Both spellings go out: `_meta.ui.csp` is the standard one and
+ * `openai/widgetCSP` is ChatGPT's compatibility key, and which a given client
+ * reads is not worth guessing. `ui.domain` is deliberately left unset — it
+ * assigns a dedicated origin and is required only to submit an app to OpenAI's
+ * directory; a private connector runs fine on the shared sandbox.
+ */
+function widgetMeta(): Record<string, unknown> {
+  const origin = publicOrigin();
+  if (!origin) return {};
+  return {
+    ui: { csp: { connectDomains: [origin], resourceDomains: [origin] } },
+    "openai/widgetCSP": { connect_domains: [origin], resource_domains: [origin] },
+  };
+}
+
 const DATE_HINT =
   "Accepts an ISO 8601 timestamp, unix seconds, 'today', 'yesterday', or a relative window like '24h' / '7d'.";
 
@@ -202,9 +239,17 @@ export function createMcpServer(call: ToolCaller): McpServer {
     server.registerResource(
       "telegram-photo-widget",
       PHOTO_WIDGET_URI,
-      { mimeType: WIDGET_MIME },
+      { mimeType: WIDGET_MIME, _meta: widgetMeta() },
       async () => ({
-        contents: [{ uri: PHOTO_WIDGET_URI, mimeType: WIDGET_MIME, text: PHOTO_WIDGET_HTML }],
+        contents: [
+          {
+            uri: PHOTO_WIDGET_URI,
+            mimeType: WIDGET_MIME,
+            text: PHOTO_WIDGET_HTML,
+            // Repeated on the content: clients differ over which they read.
+            _meta: widgetMeta(),
+          },
+        ],
       })
     );
 
@@ -215,8 +260,8 @@ export function createMcpServer(call: ToolCaller): McpServer {
         description:
           "Get a Telegram photo. Use the chat_id and message_id of a message whose " +
           "message_type is 'photo'. Returns a direct link — always include that link in your " +
-          "reply as a clickable link so the user can open the picture. Do not try to embed it " +
-          "as an image; the client strips images that come from tools.",
+          "reply as a clickable link, so the picture is reachable whether or not the client " +
+          "renders the widget that accompanies this tool.",
         inputSchema: {
           chat_id: z.number().int().describe("Chat the photo is in."),
           message_id: z.number().int().describe("message_id of the photo message."),
