@@ -380,6 +380,15 @@ directly produces the same `chat.id` as their business chat but an independent
   a short opaque link so nothing depends on rendering, and the master secret
   stays out of it. Claude renders the inline image block fine — set
   `MCP_INLINE_IMAGE=1` for clients that support it.
+
+  **The mechanism is CSP.** With Content-Security-Policy switched off on the
+  client, the picture renders. That confirms the diagnosis above rather than
+  contradicting it: the server side was always correct, and what suppressed the
+  image was the browser enforcing the page's policy. It is recorded here as a
+  cause, not a workaround — CSP is not per-connector, so turning it off weakens
+  every page in that browser, and this particular guard exists precisely to stop
+  a tool-supplied URL from becoming an exfiltration channel. A short opaque link
+  costs nothing and needs no such trade.
 * Photos are not OCR'd; video is not transcribed by default.
 * Sending is text only — no media, and no way to target a specific forum topic.
   Formatting is converted; attachments are not sent.
