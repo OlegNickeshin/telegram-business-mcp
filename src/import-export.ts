@@ -82,6 +82,55 @@ function numericId(v: string | number | undefined): number | null {
 }
 
 /**
+ * Translates an export's chat id into the one the Bot API uses.
+ *
+ * Telegram Desktop writes the bare internal id; the Bot API prefixes it. A
+ * supergroup exported as 4355964943 arrives live as -1004355964943, and a
+ * legacy group as the plain negative. Importing the raw number splits one
+ * conversation into two chats, and defeats the dedup that keeps an export and
+ * the live feed from storing the same message twice — the export usually runs
+ * to today, so the overlap is guaranteed rather than hypothetical.
+ */
+export function botApiChatId(id: number, type: string | undefined): number {
+  // Already in Bot API form (some exports, and anything re-imported).
+  if (id < 0) return id;
+  switch (type) {
+    case "private_supergroup":
+    case "public_supergroup":
+    case "private_channel":
+    case "public_channel":
+      return -1_000_000_000_000 - id;
+    case "private_group":
+    case "public_group":
+      return -id;
+    default:
+      // personal_chat, bot_chat, saved_messages: the user id, unchanged.
+      return id;
+  }
+}
+
+/** Export vocabulary for chat kinds is not the Bot API's. */
+function botApiChatType(type: string | undefined): string {
+  switch (type) {
+    case "personal_chat":
+    case "bot_chat":
+    case "saved_messages":
+      return "private";
+    case "private_group":
+    case "public_group":
+      return "group";
+    case "private_supergroup":
+    case "public_supergroup":
+      return "supergroup";
+    case "private_channel":
+    case "public_channel":
+      return "channel";
+    default:
+      return type ?? "private";
+  }
+}
+
+/**
  * Rebuilds the shape the archive already knows how to store, so the import path
  * reuses the live one — direction, chat upsert, FTS indexing and dedup all come
  * for free instead of being re-implemented and drifting.
@@ -114,8 +163,8 @@ function toTgMessage(
     from: fromId != null ? { id: fromId, first_name: m.from ?? undefined } : undefined,
     chat: {
       id: chatId,
-      type: chat.type === "personal_chat" ? "private" : chat.type ?? "private",
-      ...(chat.type === "personal_chat"
+      type: botApiChatType(chat.type),
+      ...(botApiChatType(chat.type) === "private"
         ? { first_name: chat.name ?? undefined }
         : { title: chat.name ?? undefined }),
     },
@@ -173,11 +222,11 @@ function main(): void {
   let seen = 0, imported = 0, skipped = 0, service = 0;
 
   for (const chat of chats) {
-    const chatId = chat.id;
-    if (chatId == null) {
+    if (chat.id == null) {
       log(`skipping a chat with no id ("${chat.name ?? "?"}")`);
       continue;
     }
+    const chatId = botApiChatId(chat.id, chat.type);
     const messages = chat.messages ?? [];
     const connectionId = connectionFor(db, chatId);
     const before = db
@@ -185,7 +234,9 @@ function main(): void {
       .get(chatId) as { n: number };
 
     log(
-      `"${chat.name ?? chatId}" (${chat.type}, chat_id=${chatId}): ` +
+      `"${chat.name ?? chatId}" (${chat.type}, chat_id=${chatId}` +
+        (chatId !== chat.id ? ` — remapped from export id ${chat.id}` : "") +
+        `): ` +
         `${messages.length} in the export, ${before.n} already archived` +
         (connectionId ? "" : " — no business connection known, importing with an empty one")
     );

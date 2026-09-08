@@ -229,10 +229,21 @@ npm run import -- path/to/result.json --dry-run   # show what would land
 npm run import -- path/to/result.json
 ```
 
-Desktop numbers messages the same way the Bot API does, so imported rows share
-a key space with live ones: the two histories merge on
-`(business_connection_id, chat_id, message_id)`, overlapping messages are
+Imported rows share a key space with live ones, so the two histories merge on
+`(business_connection_id, chat_id, message_id)`: overlapping messages are
 recognised rather than duplicated, and re-running the import changes nothing.
+
+That takes one translation. Desktop writes a group's bare internal id, while
+the Bot API prefixes it — a supergroup exported as `4355964943` arrives live as
+`-1004355964943` — so the importer converts by chat kind. Without it the same
+conversation lands as a second chat and the dedup above cannot fire, which
+matters because an export usually runs up to today and therefore always
+overlaps the live feed.
+
+Two things an export cannot give you, so the archive is honest about both:
+attachments have no `file_id` and cannot be fetched or transcribed (the rows
+still say a document was sent), and history migrated from a basic group into a
+supergroup carries synthetic negative `message_id`s of Desktop's own making.
 
 Everything downstream comes along — direction, media type, replies, edits, and
 full-text search over the imported text.
