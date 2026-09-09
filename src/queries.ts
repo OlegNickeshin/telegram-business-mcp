@@ -38,6 +38,7 @@ export interface MessageRow {
   transcript_engine: string | null;
   media_status: string | null;
   reply_to_message_id: number | null;
+  forward_origin: string | null;
   is_deleted: number;
   chat_title: string | null;
   chat_first_name: string | null;
@@ -52,7 +53,7 @@ const MSG_COLS = `
   m.text_formatted, m.file_name, m.file_size,
   m.transcript, m.transcript_engine, m.media_status,
   m.message_thread_id, m.topic_name, c.type AS chat_type,
-  m.reply_to_message_id, m.is_deleted,
+  m.reply_to_message_id, m.forward_origin, m.is_deleted,
   c.title AS chat_title, c.first_name AS chat_first_name,
   c.last_name AS chat_last_name, c.username AS chat_username
 `;

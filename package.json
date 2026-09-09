@@ -6,11 +6,13 @@
   "description": "Self-hosted remote Telegram connector for ChatGPT, Claude and other MCP clients via the official Telegram Business API — searchable history, model-readable files, no MTProto user session.",
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "collector": "node --env-file=.env dist/collector.js",
     "mcp-http": "node --env-file=.env dist/mcp-http.js",
     "recent": "node --env-file=.env dist/cli.js",
     "diagnose": "node tests/diagnose.mjs",
     "test:discovery": "node --test tests/discovery.test.mjs",
+    "test:forwarding": "npm run build && node --test tests/forwarding.test.mjs",
     "linear-sync": "node --env-file=.env dist/linear-sync.js",
     "linear-check": "node --env-file=.env dist/linear-sync.js --check",
     "linear-dryrun": "node --env-file=.env dist/linear-sync.js --dry-run",

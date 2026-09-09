@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { forwardOrigin } from "./forwarding.js";
 import {
   ALLOW_FORGET,
   ALLOW_MEDIA,
@@ -76,6 +77,10 @@ function msgOut(m: MessageRow) {
       last_name: m.from_last_name,
       username: m.from_username ? `@${m.from_username}` : null,
     },
+    // `from` is the sender in this chat, not necessarily the original author.
+    // False means no stored forwarding metadata, not proof of authorship.
+    is_forwarded: m.forward_origin != null,
+    forward_origin: forwardOrigin(m.forward_origin),
     chat_type: m.chat_type,
     // Forum topic, when the chat is a forum supergroup. Null in private chats.
     topic: m.message_thread_id
