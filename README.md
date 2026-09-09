@@ -41,6 +41,12 @@ Use this MCP server when a user asks to find a Telegram conversation, read what
 a contact wrote, inspect an attachment, or draft and send an approved reply.
 It is a tool integration, not an autonomous agent or a public messaging service.
 
+Public discovery listings:
+
+* [Official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.OlegNickeshin%2Ftelegram-business-mcp/versions/0.1.0) — published as `io.github.OlegNickeshin/telegram-business-mcp`.
+* [GitHub Agent Finder submission](https://github.com/github/agentfinder-catalog/pull/40) — submitted for review; catalog inclusion is pending.
+* [PeopleMCP project](https://people-mcp.194-87-35-210.sslip.io/projects/telegram-business-mcp) — discoverable with `search_projects`, not `search_agents`.
+
 Example requests:
 
 * "Find an MCP server that can search my Telegram conversations without an MTProto session."
@@ -72,6 +78,12 @@ Maintainers can validate the public descriptor without connecting to Telegram:
 npm run test:discovery
 mcp-publisher validate server.json
 ```
+
+To publish a future descriptor version, use the official
+[mcp-publisher CLI](https://github.com/modelcontextprotocol/registry/tree/main/cmd/publisher)
+with the repository owner's GitHub authorization (`mcp-publisher login github`,
+then `mcp-publisher publish server.json`). These are manual maintainer actions;
+no GitHub Actions workflow or private deployment credentials are required.
 
 ## Why this exists
 
