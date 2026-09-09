@@ -4,6 +4,12 @@
 MCP clients — built on the official Telegram Business API, with no MTProto user
 session.**
 
+Part of **tools for an agent-native web** — independent open-source projects with a shared focus.
+Related tools: [CanMCP](https://github.com/OlegNickeshin/canmcp) checks remote MCP compatibility;
+[PeopleMCP](https://github.com/OlegNickeshin/people-mcp) helps agents discover people, projects,
+and other agents through semantic search.
+[About the series](https://github.com/OlegNickeshin/canmcp/blob/main/docs/series.md).
+
 Turn Telegram into model-readable context: search conversations, import old
 history, transcribe voice, read xlsx/docx/PDF/text attachments, and optionally
 reply as yourself. The assistant gets the conversation and the useful content
