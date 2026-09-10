@@ -153,6 +153,75 @@ export async function sendMessage(
   };
 }
 
+/**
+ * Total byte budget for one batch of photos, shared between them.
+ *
+ * Six photos at the single-photo budget came to ~270 KB of base64 in one turn,
+ * and a client that copes with one image block drops six. Dividing a fixed
+ * total is what makes "show me the last six" work at all: each picture gets
+ * smaller as the batch grows, rather than the batch getting heavier.
+ */
+const MCP_PHOTOS_TOTAL_BYTES = Number(process.env.MCP_PHOTOS_TOTAL_BYTES ?? 150_000);
+/** Below this a Telegram variant is a thumbnail, so stop dividing. */
+const MCP_PHOTO_FLOOR_BYTES = 18_000;
+/** More than this in one answer is not a reading task any more. */
+const MAX_PHOTOS_PER_BATCH = 10;
+
+/**
+ * Several photos at once, sized to fit one shared budget.
+ *
+ * A failure on one is reported in place rather than failing the batch: asking
+ * for six pictures and getting five plus a reason beats getting an error.
+ */
+export async function fetchPhotos(
+  db: Database.Database,
+  chatId: number,
+  messageIds: number[]
+): Promise<{
+  count: number;
+  bytes_per_photo: number;
+  photos: {
+    message_id: number;
+    data?: string;
+    mimeType?: string;
+    bytes?: number;
+    caption: string | null;
+    url: string | null;
+    error?: string;
+  }[];
+}> {
+  if (!ALLOW_MEDIA) throw new Error("Media fetching is disabled on this server (ALLOW_MEDIA=0)");
+  const ids = [...new Set(messageIds.map((n) => Math.trunc(n)))].slice(0, MAX_PHOTOS_PER_BATCH);
+  if (!ids.length) throw new Error("message_ids is required");
+
+  const each = Math.max(MCP_PHOTO_FLOOR_BYTES, Math.floor(MCP_PHOTOS_TOTAL_BYTES / ids.length));
+
+  const photos = await Promise.all(
+    ids.map(async (messageId) => {
+      try {
+        const r = await fetchPhotoRaw(db, chatId, messageId, each);
+        return {
+          message_id: messageId,
+          data: r.buf.toString("base64"),
+          mimeType: r.mimeType,
+          bytes: r.buf.length,
+          caption: r.caption,
+          url: photoUrl(db, chatId, messageId),
+        };
+      } catch (err) {
+        return {
+          message_id: messageId,
+          caption: null,
+          url: photoUrl(db, chatId, messageId),
+          error: (err as Error).message,
+        };
+      }
+    })
+  );
+
+  return { count: photos.length, bytes_per_photo: each, photos };
+}
+
 /** Bot API method and the field the file goes in, per kind of media. */
 const SEND_METHOD: Record<string, [method: string, field: string]> = {
   photo: ["sendPhoto", "photo"],
@@ -458,6 +527,12 @@ export function forget(
   };
 }
 
+/**
+ * Smallest photo worth handing to a model. Telegram's first variant is a ~2 KB
+ * preview meant for a chat list, not for reading anything off.
+ */
+const USABLE_PHOTO_BYTES = Number(process.env.MCP_PHOTO_MIN_BYTES ?? 15_000);
+
 /** Telegram's own download cap. Anything larger cannot be fetched at all. */
 export const TELEGRAM_FILE_LIMIT = 20 * 1024 * 1024;
 
@@ -605,6 +680,14 @@ function locateFile(
     if (maxBytes && maxBytes > 0) {
       const fits = variants.filter((v) => (v.file_size ?? Infinity) <= maxBytes);
       pick = fits.length ? fits[fits.length - 1] : variants[0];
+      // Telegram's sizes jump, so a budget can land between them and leave
+      // only the 2 KB preview — which is useless to look at, while the variant
+      // just above it would have been fine. Overshooting a byte budget by a
+      // little beats returning something unreadable.
+      if ((pick.file_size ?? 0) < USABLE_PHOTO_BYTES) {
+        const usable = variants.find((v) => (v.file_size ?? 0) >= USABLE_PHOTO_BYTES);
+        if (usable) pick = usable;
+      }
     }
     fileId = pick.file_id;
     size = pick.file_size;

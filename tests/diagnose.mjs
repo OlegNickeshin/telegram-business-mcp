@@ -83,6 +83,7 @@ for (const want of TOOLS) {
 // endpoint must agree with what the server actually exposes.
 const OPTIONAL = [
   "telegram_get_photo",
+  "telegram_get_photos",
   "telegram_get_file",
   "telegram_send_message",
   "telegram_send_media",

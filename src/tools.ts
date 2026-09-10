@@ -7,6 +7,7 @@ import {
   editMessage,
   fetchFile,
   fetchPhoto,
+  fetchPhotos,
   forget,
   markRead,
   sendMedia,
@@ -136,6 +137,7 @@ export const TOOL_NAMES: ToolName[] = [
 
 /** Extra tools the MCP server may expose, each behind its own env switch. */
 export const MEDIA_TOOL = "telegram_get_photo";
+export const PHOTOS_TOOL = "telegram_get_photos";
 export const FILE_TOOL = "telegram_get_file";
 export const SEND_TOOL = "telegram_send_message";
 export const SEND_MEDIA_TOOL = "telegram_send_media";
@@ -146,7 +148,7 @@ export const FORGET_TOOL = "telegram_forget";
 export function enabledToolNames(): string[] {
   return [
     ...TOOL_NAMES,
-    ...(ALLOW_MEDIA ? [MEDIA_TOOL, FILE_TOOL] : []),
+    ...(ALLOW_MEDIA ? [MEDIA_TOOL, PHOTOS_TOOL, FILE_TOOL] : []),
     ...(ALLOW_SEND ? [SEND_TOOL, SEND_MEDIA_TOOL, EDIT_TOOL, READ_TOOL] : []),
     ...(ALLOW_FORGET ? [FORGET_TOOL] : []),
   ];
@@ -234,6 +236,17 @@ export async function runTool(
       const messageId = Number(args.message_id);
       if (!Number.isFinite(messageId)) throw new Error("message_id is required");
       return fetchPhoto(db, chatId, Math.trunc(messageId));
+    }
+
+    case PHOTOS_TOOL: {
+      if (!ALLOW_MEDIA) throw new Error(`${PHOTOS_TOOL} is disabled on this server`);
+      const chatId = requireChatId(args);
+      const raw = args.message_ids;
+      const ids = (Array.isArray(raw) ? raw : [])
+        .map((v) => (typeof v === "string" ? Number(v) : v))
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      if (!ids.length) throw new Error("message_ids must be a non-empty array of message ids");
+      return fetchPhotos(db, chatId, ids);
     }
 
     case FILE_TOOL: {

@@ -171,6 +171,7 @@ off if one server serves both.
 | `telegram_search_messages` | always | full-text, including transcripts |
 | `telegram_find_chat` | always | resolve a name to a `chat_id` |
 | `telegram_get_photo` | `ALLOW_MEDIA=1` | a photo, as a link and/or bytes |
+| `telegram_get_photos` | `ALLOW_MEDIA=1` | up to 10 photos at once, sharing one size budget |
 | `telegram_get_file` | `ALLOW_MEDIA=1` | **reads** an attachment — xlsx, docx, PDF, text — plus a link for the rest |
 | `telegram_send_message` | `ALLOW_SEND=1` | **sends as you** |
 | `telegram_send_media` | `ALLOW_SEND=1` | **sends a photo or file as you** — private chats and groups |
@@ -502,6 +503,16 @@ directly produces the same `chat.id` as their business chat but an independent
   a short opaque link so nothing depends on rendering, and the master secret
   stays out of it. Claude renders the inline image block fine — set
   `MCP_INLINE_IMAGE=1` for clients that support it.
+
+  **Several photos at once need `telegram_get_photos`, not six calls to
+  `telegram_get_photo`.** Six single calls came to ~277 KB of base64 in one
+  turn, and a client that copes with one image block drops six. The batch tool
+  divides one total budget between them — 180 KB for the same six, in a single
+  result — so a picture gets smaller as the batch grows rather than the batch
+  getting heavier. Telegram's ready-made sizes jump, so a budget can land
+  between two of them; the smallest variant is a ~2 KB chat-list preview, and
+  nothing can be read off it, so a budget that would select one overshoots to
+  the next size up instead.
 
   A link is not the same as the model *seeing* the picture. Without
   `MCP_INLINE_IMAGE=1` no image block is sent at all, so nothing can answer

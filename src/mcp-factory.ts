@@ -13,6 +13,7 @@ import {
   FILE_TOOL,
   FORGET_TOOL,
   MEDIA_TOOL,
+  PHOTOS_TOOL,
   READ_TOOL,
   SEND_MEDIA_TOOL,
   SEND_TOOL,
@@ -389,6 +390,54 @@ export function createMcpServer(call: ToolCaller): McpServer {
           // toolResponseMetadata. Two delivery paths for one small object is
           // cheaper than a blank widget when a client changes which it uses.
           _meta: { url: r.url!, caption: r.caption },
+        };
+      }
+    );
+
+    server.registerTool(
+      PHOTOS_TOOL,
+      {
+        title: "View several Telegram photos",
+        description:
+          "Look at several photos from one chat in a single call. Prefer this over calling " +
+          "telegram_get_photo repeatedly: the pictures share one size budget, so six of them " +
+          "cost about what one does, and a client that drops six separate image blocks keeps " +
+          "these. Pass the message_ids of messages whose message_type is 'photo'. Each photo " +
+          "also comes with a link — include the links in your reply.",
+        inputSchema: {
+          chat_id: z.number().int().describe("Chat the photos are in."),
+          message_ids: z.array(z.number().int()).min(1).max(10)
+            .describe("Up to 10 message_ids of photo messages in that chat."),
+        },
+        annotations: readOnly("View several Telegram photos"),
+      },
+      async (args) => {
+        const r = (await call(PHOTOS_TOOL, args as Args)) as {
+          count: number;
+          photos: {
+            message_id: number;
+            data?: string;
+            mimeType?: string;
+            caption: string | null;
+            url: string | null;
+            error?: string;
+          }[];
+        };
+        const lines = r.photos.map((p) =>
+          p.error
+            ? `#${p.message_id}: could not fetch — ${p.error}`
+            : `#${p.message_id}: ${p.url ?? "(no link configured)"}` +
+              (p.caption ? ` — ${p.caption}` : "")
+        );
+        return {
+          content: [
+            // Links first, for the same reason as the single-photo tool: the
+            // text is the part that always survives.
+            { type: "text" as const, text: lines.join("\n") },
+            ...r.photos
+              .filter((p) => p.data && p.mimeType)
+              .map((p) => ({ type: "image" as const, data: p.data!, mimeType: p.mimeType! })),
+          ],
         };
       }
     );
