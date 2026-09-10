@@ -39,6 +39,9 @@ interface ExportMessage {
   reply_to_message_id?: number;
   forwarded_from?: string;
   media_type?: string;
+  /** Service messages carry these: `topic_created` names a forum topic. */
+  action?: string;
+  title?: string;
   photo?: string;
   file?: string;
   file_name?: string;
@@ -79,6 +82,64 @@ function numericId(v: string | number | undefined): number | null {
   if (typeof v !== "string") return null;
   const m = v.match(/(-?\d+)$/);
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * Works out which forum topic each message belongs to.
+ *
+ * An export records no thread id at all. What it does record is a
+ * `topic_created` service message per topic — whose own `id` *is* the thread id
+ * Telegram uses — and a `reply_to_message_id` on everything posted inside one.
+ * A message in a topic points at the message it answers, which points at the
+ * next, and so on back to the topic root, so the thread is recovered by walking
+ * that chain.
+ *
+ * A chain that ends without reaching a root means General, or a parent that
+ * fell outside the export. Both are left without a thread rather than guessed
+ * at: claiming the wrong topic is worse than claiming none.
+ */
+function topicIndex(messages: ExportMessage[]): {
+  names: Map<number, string>;
+  threadOf: Map<number, number>;
+} {
+  const names = new Map<number, string>();
+  for (const m of messages) {
+    if (m.action === "topic_created" && m.title) names.set(m.id, m.title);
+  }
+
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  const threadOf = new Map<number, number>();
+  if (!names.size) return { names, threadOf };
+
+  const resolve = (start: number | undefined): number | undefined => {
+    const path: number[] = [];
+    let id = start;
+    // `seen` guards against a reply cycle, which should not exist but would
+    // hang the import if it did.
+    const seen = new Set<number>();
+    while (id != null && !seen.has(id)) {
+      seen.add(id);
+      const cached = threadOf.get(id);
+      if (cached != null) {
+        for (const p of path) threadOf.set(p, cached);
+        return cached;
+      }
+      if (names.has(id)) {
+        for (const p of path) threadOf.set(p, id);
+        return id;
+      }
+      path.push(id);
+      id = byId.get(id)?.reply_to_message_id;
+    }
+    return undefined;
+  };
+
+  for (const m of messages) {
+    if (m.reply_to_message_id == null) continue;
+    const thread = resolve(m.reply_to_message_id);
+    if (thread != null) threadOf.set(m.id, thread);
+  }
+  return { names, threadOf };
 }
 
 /**
@@ -139,7 +200,8 @@ function toTgMessage(
   m: ExportMessage,
   chat: ExportChat,
   chatId: number,
-  connectionId: string
+  connectionId: string,
+  threadId?: number
 ): TgMessage {
   const text = flattenText(m.text);
   const media: Record<string, unknown> = {};
@@ -174,6 +236,7 @@ function toTgMessage(
     ...(hasMedia ? { caption: text || undefined } : { text }),
     ...media,
     ...(m.reply_to_message_id ? { reply_to_message: { message_id: m.reply_to_message_id } } : {}),
+    ...(threadId ? { message_thread_id: threadId } : {}),
     ...(m.forwarded_from ? { forward_origin: { sender_user_name: m.forwarded_from } } : {}),
     // The untouched export record, so nothing is lost to this translation.
     _export: m,
@@ -235,6 +298,25 @@ function main(): void {
     const chatId = botApiChatId(chat.id, chat.type);
     const messages = chat.messages ?? [];
     const connectionId = connectionFor(db, chatId, chat.type ?? "");
+    const { names: topicNames, threadOf } = topicIndex(messages);
+
+    // Names come from `topic_created`, which records the title a topic was
+    // given — not the title it has now. A `topic_edit` carries the rename but
+    // no reference to which topic it renamed, so a rename cannot be attributed
+    // from an export at all. Live traffic knows the current name, so it wins:
+    // these are only filled in where nothing is on record yet.
+    if (topicNames.size) {
+      const insertTopic = db.prepare(
+        `INSERT INTO topics (chat_id, message_thread_id, name, updated_at)
+         VALUES (?, ?, ?, ?) ON CONFLICT(chat_id, message_thread_id) DO NOTHING`
+      );
+      const now = Math.floor(Date.now() / 1000);
+      db.transaction(() => {
+        for (const [threadId, name] of topicNames) {
+          insertTopic.run(chatId, threadId, name, now);
+        }
+      })();
+    }
     const before = db
       .prepare("SELECT COUNT(*) AS n FROM messages WHERE chat_id = ?")
       .get(chatId) as { n: number };
@@ -242,6 +324,7 @@ function main(): void {
     log(
       `"${chat.name ?? chatId}" (${chat.type}, chat_id=${chatId}` +
         (chatId !== chat.id ? ` — remapped from export id ${chat.id}` : "") +
+        (topicNames.size ? `, ${topicNames.size} forum topics` : "") +
         `): ` +
         `${messages.length} in the export, ${before.n} already archived` +
         (connectionId ? "" : " — no business connection known, importing with an empty one")
@@ -253,7 +336,7 @@ function main(): void {
         // Joins, title changes and the like carry no conversation.
         if (m.type !== "message") { service++; continue; }
 
-        const tg = toTgMessage(m, chat, chatId, connectionId);
+        const tg = toTgMessage(m, chat, chatId, connectionId, threadOf.get(m.id));
         if (DRY_RUN) {
           if (imported < 5) {
             const when = new Date(tg.date * 1000).toISOString().slice(0, 16).replace("T", " ");

@@ -503,6 +503,15 @@ directly produces the same `chat.id` as their business chat but an independent
   stays out of it. Claude renders the inline image block fine — set
   `MCP_INLINE_IMAGE=1` for clients that support it.
 
+  A link is not the same as the model *seeing* the picture. Without
+  `MCP_INLINE_IMAGE=1` no image block is sent at all, so nothing can answer
+  "what is in this photo" — a client that used to describe one was fetching the
+  link itself, not reading a tool result. With the flag on, the text block
+  carrying the link is emitted **first** and the image block second, so a client
+  that chokes on a few hundred KB of base64 has already been handed the working
+  answer. `MCP_PHOTO_MAX_BYTES` bounds it by picking the largest ready-made
+  Telegram variant that fits — 100 000 keeps a typical photo around 40–100 KB.
+
   **The cause was a missing widget CSP, and it is now declared.** With
   Content-Security-Policy switched off on the client, photos render — which
   located the problem exactly. An Apps SDK widget runs in a sandboxed iframe

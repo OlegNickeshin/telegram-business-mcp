@@ -312,10 +312,14 @@ export function createMcpServer(call: ToolCaller): McpServer {
         }
         return {
           content: [
+            // Text first, deliberately. The link is the path that reliably
+            // works; the image block is the experiment. Emitting the link
+            // ahead of a few hundred KB of base64 means a client that chokes
+            // on the image has already been given the working answer.
+            { type: "text" as const, text: lines.join("\n") },
             ...(INLINE_IMAGE
               ? [{ type: "image" as const, data: r.data, mimeType: r.mimeType }]
               : []),
-            { type: "text" as const, text: lines.join("\n") },
           ],
           // What the Apps SDK widget reads; ignored by clients without it.
           structuredContent: { url: r.url!, caption: r.caption },
