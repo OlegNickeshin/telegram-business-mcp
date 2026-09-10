@@ -44,7 +44,22 @@ const PHOTO_WIDGET_URI = "ui://widget/telegram-photo.html";
  *  appears in older write-ups, is not what the client looks for. */
 const WIDGET_MIME = "text/html;profile=mcp-app";
 
-const PHOTO_WIDGET_HTML = `<!DOCTYPE html>
+/**
+ * The widget HTML, parameterised by the origin it is allowed to load from.
+ *
+ * `window.openai.toolOutput` is ChatGPT's alias; the documented mechanism is
+ * the MCP Apps bridge, which delivers `structuredContent` in a
+ * `ui/notifications/tool-result` postMessage. Reading only the alias, once, at
+ * first paint, is three assumptions stacked — and the widget went blank when
+ * one of them stopped holding. So: try both sources, keep trying for a few
+ * seconds, and only then admit defeat.
+ *
+ * The origin check is not ceremony. This paints a URL straight into an <img>,
+ * and a postMessage handler will take one from anyone; restricting it to the
+ * origin this server hands out links on costs nothing.
+ */
+function photoWidgetHtml(origin: string | null): string {
+  return `<!DOCTYPE html>
 <meta charset="utf-8">
 <style>
   body { margin: 0; font: 14px system-ui, sans-serif; color: #ddd; background: transparent; }
@@ -53,22 +68,69 @@ const PHOTO_WIDGET_HTML = `<!DOCTYPE html>
   figcaption { padding: 6px 2px 0; opacity: .75; }
   .empty { padding: 12px; opacity: .7; }
 </style>
-<div id="root" class="empty">Loading photo…</div>
+<div id="root" class="empty">Loading photo\u2026</div>
 <script>
-  function render() {
-    var out = (window.openai && window.openai.toolOutput) || {};
-    var root = document.getElementById("root");
-    if (!out.url) { root.textContent = "No photo URL in the tool result."; return; }
-    root.className = "";
-    var cap = out.caption
-      ? '<figcaption>' + String(out.caption).replace(/[<&>]/g, "") + '</figcaption>'
-      : "";
-    root.innerHTML = '<figure><img alt="Telegram photo" src="' + out.url + '">' + cap + '</figure>';
+(function () {
+  var ORIGIN = ${JSON.stringify(origin ?? "")};
+  var root = document.getElementById("root");
+  var done = false;
+
+  function ok(url) {
+    return typeof url === "string" && (!ORIGIN || url.indexOf(ORIGIN + "/") === 0);
   }
-  render();
-  // The host may deliver the payload after first paint.
-  window.addEventListener("openai:set_globals", render);
+
+  function paint(url, caption) {
+    if (done || !ok(url)) return;
+    done = true;
+    root.className = "";
+    var fig = document.createElement("figure");
+    var img = document.createElement("img");
+    img.alt = "Telegram photo";
+    img.src = url;
+    fig.appendChild(img);
+    if (caption) {
+      var cap = document.createElement("figcaption");
+      // textContent, not innerHTML: the caption is someone else's words.
+      cap.textContent = String(caption);
+      fig.appendChild(cap);
+    }
+    root.textContent = "";
+    root.appendChild(fig);
+  }
+
+  function fromGlobals() {
+    var o = window.openai || {};
+    return o.toolOutput || o.toolResponseMetadata || null;
+  }
+
+  function tryGlobals() {
+    var out = fromGlobals();
+    if (out && out.url) paint(out.url, out.caption);
+    return done;
+  }
+
+  // The bridge delivers structuredContent as a notification.
+  window.addEventListener("message", function (e) {
+    var d = e && e.data;
+    if (!d || typeof d !== "object") return;
+    var sc = (d.params && d.params.structuredContent) ||
+             (d.result && d.result.structuredContent) ||
+             d.structuredContent;
+    if (sc && sc.url) paint(sc.url, sc.caption);
+  });
+  window.addEventListener("openai:set_globals", tryGlobals);
+
+  // The payload routinely arrives after first paint, so poll briefly rather
+  // than deciding once.
+  var tries = 0;
+  (function tick() {
+    if (tryGlobals()) return;
+    if (++tries < 40) return setTimeout(tick, 100);
+    root.textContent = "No photo URL in the tool result.";
+  })();
+})();
 </script>`;
+}
 
 /**
  * The origin this server hands out photo links on.
@@ -253,7 +315,7 @@ export function createMcpServer(call: ToolCaller): McpServer {
           {
             uri: PHOTO_WIDGET_URI,
             mimeType: WIDGET_MIME,
-            text: PHOTO_WIDGET_HTML,
+            text: photoWidgetHtml(publicOrigin()),
             // Repeated on the content: clients differ over which they read.
             _meta: widgetMeta(),
           },
@@ -323,6 +385,10 @@ export function createMcpServer(call: ToolCaller): McpServer {
           ],
           // What the Apps SDK widget reads; ignored by clients without it.
           structuredContent: { url: r.url!, caption: r.caption },
+          // The same thing again on _meta, which reaches the widget as
+          // toolResponseMetadata. Two delivery paths for one small object is
+          // cheaper than a blank widget when a client changes which it uses.
+          _meta: { url: r.url!, caption: r.caption },
         };
       }
     );
