@@ -16,6 +16,7 @@ import {
   PHOTOS_TOOL,
   SHOW_PHOTO_TOOL,
   READ_TOOL,
+  REACT_TOOL,
   SEND_MEDIA_TOOL,
   SEND_TOOL,
 } from "./tools.js";
@@ -619,6 +620,36 @@ export function createMcpServer(call: ToolCaller): McpServer {
         },
       },
       async (args) => json(await call(SEND_MEDIA_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      REACT_TOOL,
+      {
+        title: "React to a Telegram message",
+        description:
+          "Put an emoji reaction on a message, the way a person taps one in Telegram. " +
+          "The other person sees it and is notified, so confirm the message and the emoji " +
+          "with the user first. Only Telegram's standard reaction emoji are accepted — " +
+          "👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🎉 🤩 🙏 👌 💯 🤣 ⚡ 🤝 🫡 and similar; anything else is " +
+          "refused by Telegram, not by this server. Omit `emoji` to remove a reaction " +
+          "previously set. In a private chat the reaction comes from the user; in a group " +
+          "there is no business connection, so it comes from the bot.",
+        inputSchema: {
+          chat_id: z.number().int().describe("Chat the message is in."),
+          message_id: z.number().int().describe("message_id to react to."),
+          emoji: z.string().optional()
+            .describe("The reaction emoji. Leave out to remove the existing reaction."),
+          big: z.boolean().optional().describe("Play the big animation for the recipient."),
+        },
+        annotations: {
+          title: "React to a Telegram message",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async (args) => json(await call(REACT_TOOL, args as Args))
     );
 
     server.registerTool(

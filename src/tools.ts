@@ -11,6 +11,7 @@ import {
   forget,
   markRead,
   sendMedia,
+  setReaction,
   sendMessage,
 } from "./actions.js";
 import {
@@ -145,13 +146,14 @@ export const SEND_TOOL = "telegram_send_message";
 export const SEND_MEDIA_TOOL = "telegram_send_media";
 export const EDIT_TOOL = "telegram_edit_message";
 export const READ_TOOL = "telegram_mark_read";
+export const REACT_TOOL = "telegram_set_reaction";
 export const FORGET_TOOL = "telegram_forget";
 
 export function enabledToolNames(): string[] {
   return [
     ...TOOL_NAMES,
     ...(ALLOW_MEDIA ? [MEDIA_TOOL, PHOTOS_TOOL, SHOW_PHOTO_TOOL, FILE_TOOL] : []),
-    ...(ALLOW_SEND ? [SEND_TOOL, SEND_MEDIA_TOOL, EDIT_TOOL, READ_TOOL] : []),
+    ...(ALLOW_SEND ? [SEND_TOOL, SEND_MEDIA_TOOL, REACT_TOOL, EDIT_TOOL, READ_TOOL] : []),
     ...(ALLOW_FORGET ? [FORGET_TOOL] : []),
   ];
 }
@@ -296,6 +298,20 @@ export async function runTool(
         replyTo: num(args.reply_to_message_id),
         threadId: num(args.message_thread_id),
       });
+    }
+
+    case REACT_TOOL: {
+      if (!ALLOW_SEND) throw new Error(`${REACT_TOOL} is disabled on this server`);
+      const chatId = requireChatId(args);
+      const messageId = Number(args.message_id);
+      if (!Number.isFinite(messageId)) throw new Error("message_id is required");
+      return setReaction(
+        db,
+        chatId,
+        Math.trunc(messageId),
+        args.emoji != null ? String(args.emoji) : null,
+        args.big === true
+      );
     }
 
     case EDIT_TOOL: {

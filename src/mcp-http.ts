@@ -94,6 +94,32 @@ function contentDisposition(filename: string, inline: boolean): string {
   return `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
+/**
+ * One line per JSON-RPC call: the method, the tool, and the ids it was aimed
+ * at. Never arguments beyond that — a send carries the text of a message.
+ *
+ * Without this there was no way to tell how often a client calls, or which
+ * tool it is calling in a loop: Caddy keeps no access log for this site and the
+ * server logged only failures.
+ */
+function logCalls(body: unknown): void {
+  if (process.env.MCP_LOG_CALLS === "0") return;
+  for (const msg of Array.isArray(body) ? body : [body]) {
+    const m = msg as { method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
+    if (!m?.method) continue;
+    const a = m.params?.arguments ?? {};
+    const ids = ["chat_id", "message_id", "from_message_id"]
+      .filter((k) => a[k] != null)
+      .map((k) => `${k}=${a[k]}`);
+    if (Array.isArray(a.message_ids)) ids.push(`message_ids=${a.message_ids.length}`);
+    console.log(
+      `${new Date().toISOString()} ${m.method}` +
+        (m.params?.name ? ` ${m.params.name}` : "") +
+        (ids.length ? ` ${ids.join(" ")}` : "")
+    );
+  }
+}
+
 function send(res: http.ServerResponse, code: number, body: unknown): void {
   const json = JSON.stringify(body);
   res.writeHead(code, {
@@ -182,6 +208,7 @@ const server = http.createServer(async (req, res) => {
       }
       const raw = Buffer.concat(chunks).toString("utf8");
       body = raw.trim() ? JSON.parse(raw) : undefined;
+      logCalls(body);
     } catch (err) {
       return send(res, 400, {
         jsonrpc: "2.0",

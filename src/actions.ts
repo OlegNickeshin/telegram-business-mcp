@@ -378,6 +378,75 @@ export async function sendMedia(
 }
 
 /**
+ * Puts a reaction on a message, or takes ours off.
+ *
+ * The set of emoji Telegram accepts is not hardcoded here. It changes, it is
+ * per-chat configurable, and a stale copy would refuse something valid — so the
+ * emoji goes through and Telegram's own refusal is passed back intact.
+ *
+ * Behind ALLOW_SEND rather than ALLOW_MEDIA: a reaction is visible to the other
+ * person and notifies them, which makes it a write, not a read.
+ */
+export async function setReaction(
+  db: Database.Database,
+  chatId: number,
+  messageId: number,
+  emoji?: string | null,
+  big = false
+): Promise<unknown> {
+  if (!ALLOW_SEND) throw new Error("Sending is disabled on this server (ALLOW_SEND=0)");
+
+  const chat = knownChat(db, chatId);
+  const known = db
+    .prepare("SELECT 1 AS ok FROM messages WHERE chat_id = ? AND message_id = ?")
+    .get(chatId, messageId) as { ok: number } | undefined;
+  if (!known) {
+    throw new Error(
+      `no message ${messageId} in chat ${chatId}. React only to messages in the archive.`
+    );
+  }
+
+  const wanted = (emoji ?? "").trim();
+  try {
+    await call("setMessageReaction", {
+      ...(chat.business_connection_id
+        ? { business_connection_id: chat.business_connection_id }
+        : {}),
+      chat_id: chatId,
+      message_id: messageId,
+      reaction: wanted ? [{ type: "emoji", emoji: wanted }] : [],
+      ...(big && wanted ? { is_big: true } : {}),
+    });
+  } catch (err) {
+    const msg = (err as Error).message;
+    // Telegram names a rejected emoji rather than explaining it; say what to do.
+    if (/REACTION_INVALID/i.test(msg)) {
+      throw new Error(
+        `Telegram does not accept "${wanted}" as a reaction here. Use one of its standard ` +
+          `reaction emoji (👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🎉 🤩 🙏 👌 💯 🤣 ⚡ 🤝 🫡 and similar).`
+      );
+    }
+    throw err;
+  }
+
+  console.log(
+    `${new Date().toISOString()} REACTION ${wanted || "(removed)"} on chat_id=${chatId} ` +
+      `message_id=${messageId}`
+  );
+
+  return {
+    ok: true,
+    chat_id: chatId,
+    chat_name: displayName(chat),
+    message_id: messageId,
+    reaction: wanted || null,
+    removed: !wanted,
+    // A group has no business connection, so the reaction is the bot's own.
+    reacted_as: chat.business_connection_id ? "you" : "the bot",
+  };
+}
+
+/**
  * Marks a message, and everything before it in that chat, as read. Invisible to
  * the other side beyond the read receipt they would have seen anyway.
  */

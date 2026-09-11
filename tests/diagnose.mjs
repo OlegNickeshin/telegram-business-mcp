@@ -88,6 +88,7 @@ const OPTIONAL = [
   "telegram_get_file",
   "telegram_send_message",
   "telegram_send_media",
+  "telegram_set_reaction",
   "telegram_edit_message",
   "telegram_mark_read",
   "telegram_forget",
@@ -97,6 +98,7 @@ const OPTIONAL = [
 const WRITERS = [
   "telegram_send_message",
   "telegram_send_media",
+  "telegram_set_reaction",
   "telegram_edit_message",
   "telegram_mark_read",
   "telegram_forget",

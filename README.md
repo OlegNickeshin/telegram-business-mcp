@@ -176,6 +176,7 @@ off if one server serves both.
 | `telegram_get_file` | `ALLOW_MEDIA=1` | **reads** an attachment — xlsx, docx, PDF, text — plus a link for the rest |
 | `telegram_send_message` | `ALLOW_SEND=1` | **sends as you** |
 | `telegram_send_media` | `ALLOW_SEND=1` | **sends a photo or file as you** — private chats and groups |
+| `telegram_set_reaction` | `ALLOW_SEND=1` | **reacts** to a message with an emoji |
 | `telegram_edit_message` | `ALLOW_SEND=1` | rewrites one of your own |
 | `telegram_mark_read` | `ALLOW_SEND=1` | clears an unread badge |
 | `telegram_forget` | `ALLOW_FORGET=1` | **deletes from the local archive** |
@@ -309,6 +310,14 @@ The guard against a misread request is currently the model confirming first,
 which is a soft one. If you want a hard gate, a two-phase
 `prepare_send` → `confirm_send` is the shape to add — deliberately not built
 yet, because it changes the product from "reply for me" into "draft for me".
+
+`telegram_set_reaction` taps an emoji onto a message the way a person does, and
+removes it again when `emoji` is left out. The accepted emoji are Telegram's
+standard reaction set, which is not copied into this repo: it changes, it is
+configurable per chat, and a stale list would refuse something valid — so the
+emoji is passed through and Telegram's own refusal is relayed with a hint about
+what it wants. It sits behind `ALLOW_SEND` because the other person sees it and
+is notified, which makes it a write.
 
 `telegram_forget` removes our stored copy only — Telegram keeps the messages for
 both people. It refuses to
