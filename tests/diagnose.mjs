@@ -84,6 +84,7 @@ for (const want of TOOLS) {
 const OPTIONAL = [
   "telegram_get_photo",
   "telegram_get_photos",
+  "telegram_show_photo",
   "telegram_get_file",
   "telegram_send_message",
   "telegram_send_media",

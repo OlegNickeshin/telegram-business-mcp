@@ -138,6 +138,8 @@ export const TOOL_NAMES: ToolName[] = [
 /** Extra tools the MCP server may expose, each behind its own env switch. */
 export const MEDIA_TOOL = "telegram_get_photo";
 export const PHOTOS_TOOL = "telegram_get_photos";
+/** Displays a photo through the widget; the reading tools cannot, see mcp-factory. */
+export const SHOW_PHOTO_TOOL = "telegram_show_photo";
 export const FILE_TOOL = "telegram_get_file";
 export const SEND_TOOL = "telegram_send_message";
 export const SEND_MEDIA_TOOL = "telegram_send_media";
@@ -148,7 +150,7 @@ export const FORGET_TOOL = "telegram_forget";
 export function enabledToolNames(): string[] {
   return [
     ...TOOL_NAMES,
-    ...(ALLOW_MEDIA ? [MEDIA_TOOL, PHOTOS_TOOL, FILE_TOOL] : []),
+    ...(ALLOW_MEDIA ? [MEDIA_TOOL, PHOTOS_TOOL, SHOW_PHOTO_TOOL, FILE_TOOL] : []),
     ...(ALLOW_SEND ? [SEND_TOOL, SEND_MEDIA_TOOL, EDIT_TOOL, READ_TOOL] : []),
     ...(ALLOW_FORGET ? [FORGET_TOOL] : []),
   ];

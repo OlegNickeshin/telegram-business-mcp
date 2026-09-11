@@ -14,6 +14,7 @@ import {
   FORGET_TOOL,
   MEDIA_TOOL,
   PHOTOS_TOOL,
+  SHOW_PHOTO_TOOL,
   READ_TOOL,
   SEND_MEDIA_TOOL,
   SEND_TOOL,
@@ -324,15 +325,64 @@ export function createMcpServer(call: ToolCaller): McpServer {
       })
     );
 
+    // Two tools, because "what is in this photo" and "show me this photo" turn
+    // out to be different requests that one tool cannot serve at once.
+    //
+    // With a widget template attached, ChatGPT hands the result to the widget
+    // and the model does not get the image block — confirmed on the same
+    // photo, where the server sent a readable 69 KB image from both this tool
+    // and the batch tool, and only the one without a widget was actually read.
+    // It also explains why reading worked exactly while the widget was broken.
+    // So the reading tool carries no widget, and the widget lives on its own.
     server.registerTool(
       MEDIA_TOOL,
       {
-        title: "View a Telegram photo",
+        title: "Look at a Telegram photo",
         description:
-          "Get a Telegram photo. Use the chat_id and message_id of a message whose " +
-          "message_type is 'photo'. Returns a direct link — always include that link in your " +
-          "reply as a clickable link, so the picture is reachable whether or not the client " +
-          "renders the widget that accompanies this tool.",
+          "Look at a Telegram photo so you can describe it, read text in it or answer " +
+          "questions about it. Use the chat_id and message_id of a message whose " +
+          "message_type is 'photo'. For several photos use telegram_get_photos instead. " +
+          "Include the returned link in your reply so the user can open the picture. " +
+          "To simply display a photo to the user, use telegram_show_photo.",
+        inputSchema: {
+          chat_id: z.number().int().describe("Chat the photo is in."),
+          message_id: z.number().int().describe("message_id of the photo message."),
+        },
+        annotations: readOnly("Look at a Telegram photo"),
+      },
+      async (args) => {
+        const r = (await call(MEDIA_TOOL, args as Args)) as {
+          data: string;
+          mimeType: string;
+          caption: string | null;
+          url: string | null;
+        };
+        const lines = [
+          r.url ? `[Open photo](${r.url})` : null,
+          r.caption ? `Caption: ${r.caption}` : null,
+        ].filter(Boolean) as string[];
+        return {
+          content: [
+            // Text first: the link is the part that always survives.
+            ...(lines.length ? [{ type: "text" as const, text: lines.join("\n") }] : []),
+            ...(INLINE_IMAGE || !lines.length
+              ? [{ type: "image" as const, data: r.data, mimeType: r.mimeType }]
+              : []),
+          ],
+        };
+      }
+    );
+
+    server.registerTool(
+      SHOW_PHOTO_TOOL,
+      {
+        title: "Show a Telegram photo",
+        description:
+          "Display a Telegram photo to the user as a picture in the conversation. This " +
+          "does not let you see the image — to describe it or read anything in it, use " +
+          "telegram_get_photo. Use the chat_id and message_id of a message whose " +
+          "message_type is 'photo'. Always include the returned link as a clickable link, " +
+          "since not every client renders the picture.",
         inputSchema: {
           chat_id: z.number().int().describe("Chat the photo is in."),
           message_id: z.number().int().describe("message_id of the photo message."),
@@ -341,7 +391,7 @@ export function createMcpServer(call: ToolCaller): McpServer {
           url: z.string().describe("Direct link to the image."),
           caption: z.string().nullable().describe("Caption, if the message had one."),
         },
-        annotations: readOnly("View a Telegram photo"),
+        annotations: readOnly("Show a Telegram photo"),
         _meta: {
           // The documented key is _meta.ui.resourceUri; openai/outputTemplate is
           // only a compatibility alias, so send both.
@@ -351,45 +401,26 @@ export function createMcpServer(call: ToolCaller): McpServer {
       },
       async (args) => {
         const r = (await call(MEDIA_TOOL, args as Args)) as {
-          data: string;
-          mimeType: string;
-          bytes: number;
           caption: string | null;
           url: string | null;
         };
-        // The inline image block is correct MCP and Claude renders it, but
-        // ChatGPT does not — and a few hundred KB of base64 in a tool result
-        // has been enough to make it return nothing at all. Off by default:
-        // the link is what actually reaches the conversation.
-        // A markdown *image* is stripped by ChatGPT's exfiltration guard; a
-        // plain link survives. Give the link, and say so, rather than emitting
-        // something the client will silently drop.
-        const lines = [
-          r.url ? `[Open photo](${r.url})` : null,
-          r.caption ? `Caption: ${r.caption}` : null,
-          r.url ? r.url : null,
-        ].filter(Boolean) as string[];
-        if (!lines.length) {
-          // No public URL configured, so bytes are the only thing we can offer.
-          return { content: [{ type: "image" as const, data: r.data, mimeType: r.mimeType }] };
+        if (!r.url) {
+          throw new Error("No public link is configured (MCP_PUBLIC_URL), so a photo cannot be shown");
         }
         return {
+          // No image block: the widget does the showing, and bytes the model
+          // cannot use would only weigh down the reply.
           content: [
-            // Text first, deliberately. The link is the path that reliably
-            // works; the image block is the experiment. Emitting the link
-            // ahead of a few hundred KB of base64 means a client that chokes
-            // on the image has already been given the working answer.
-            { type: "text" as const, text: lines.join("\n") },
-            ...(INLINE_IMAGE
-              ? [{ type: "image" as const, data: r.data, mimeType: r.mimeType }]
-              : []),
+            {
+              type: "text" as const,
+              text: [`[Open photo](${r.url})`, r.caption ? `Caption: ${r.caption}` : null]
+                .filter(Boolean)
+                .join("\n"),
+            },
           ],
-          // What the Apps SDK widget reads; ignored by clients without it.
-          structuredContent: { url: r.url!, caption: r.caption },
-          // The same thing again on _meta, which reaches the widget as
-          // toolResponseMetadata. Two delivery paths for one small object is
-          // cheaper than a blank widget when a client changes which it uses.
-          _meta: { url: r.url!, caption: r.caption },
+          // What the widget reads — on both paths, since clients differ.
+          structuredContent: { url: r.url, caption: r.caption },
+          _meta: { url: r.url, caption: r.caption },
         };
       }
     );

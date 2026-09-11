@@ -170,7 +170,8 @@ off if one server serves both.
 | `telegram_get_messages` | always | one conversation, oldest first |
 | `telegram_search_messages` | always | full-text, including transcripts |
 | `telegram_find_chat` | always | resolve a name to a `chat_id` |
-| `telegram_get_photo` | `ALLOW_MEDIA=1` | a photo, as a link and/or bytes |
+| `telegram_get_photo` | `ALLOW_MEDIA=1` | **looks at** a photo — the model gets the pixels |
+| `telegram_show_photo` | `ALLOW_MEDIA=1` | **displays** a photo to the user, via the widget |
 | `telegram_get_photos` | `ALLOW_MEDIA=1` | up to 10 photos at once, sharing one size budget |
 | `telegram_get_file` | `ALLOW_MEDIA=1` | **reads** an attachment — xlsx, docx, PDF, text — plus a link for the rest |
 | `telegram_send_message` | `ALLOW_SEND=1` | **sends as you** |
@@ -503,6 +504,15 @@ directly produces the same `chat.id` as their business chat but an independent
   a short opaque link so nothing depends on rendering, and the master secret
   stays out of it. Claude renders the inline image block fine — set
   `MCP_INLINE_IMAGE=1` for clients that support it.
+
+  **Looking and showing are separate tools, on purpose.** With an Apps SDK
+  widget template attached, ChatGPT routes the tool result to the widget and the
+  model does not receive the image block. This was measured, not assumed: for
+  the same photo the server sent a readable 69 KB image from two tools, and only
+  the one without a widget was actually read — which is also why reading had
+  worked exactly while the widget was broken. So `telegram_get_photo` carries no
+  widget and returns pixels, and `telegram_show_photo` carries the widget and
+  returns no pixels, since the model could not use them there anyway.
 
   **Several photos at once need `telegram_get_photos`, not six calls to
   `telegram_get_photo`.** Six single calls came to ~277 KB of base64 in one
