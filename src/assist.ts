@@ -156,25 +156,64 @@ export function listPending(db: Database.Database, limit = 20, scope: PendingSco
   };
 }
 
+interface DirectMessageRow {
+  chat_id: number;
+  message_id: number;
+  from_id: number | null;
+  from_first_name: string | null;
+  from_last_name: string | null;
+  from_username: string | null;
+  text: string | null;
+  date: number;
+}
+
 /**
  * Someone messaged the bot's own account directly — a different chat than the
- * owner's Business line, and not part of the archive (the bot holds no model
- * and Business already covers 1:1 with the owner). Relay it to the owner as a
- * plain notification so it is not missed; this is not archived and the bot
- * does not reply on the owner's behalf here.
+ * owner's Business line. Recorded in its own table rather than `messages`:
+ * chat_id is the other party's user id either way, so the same person's
+ * business chat and bot-direct chat share a chat_id, but message_id is a
+ * separate counter per line — merging them would misattribute one
+ * conversation's messages into the other's transcript.
+ *
+ * Also relayed to the owner as a live notification (unless it is the owner's
+ * own chat with the bot) so it is not missed; the bot does not reply on the
+ * owner's behalf here.
  */
-export async function forwardDirectMessage(m: {
-  chat: { id: number };
-  from?: { id: number; first_name?: string; last_name?: string; username?: string; is_bot?: boolean };
-  text?: string;
-  caption?: string;
-}): Promise<void> {
-  if (OWNER_CHAT_ID == null) return;
-  if (m.chat.id === OWNER_CHAT_ID) return; // the owner's own chat with the bot
+export async function recordDirectMessage(
+  db: Database.Database,
+  m: {
+    chat: { id: number };
+    from?: { id: number; first_name?: string; last_name?: string; username?: string; is_bot?: boolean };
+    message_id: number;
+    date: number;
+    text?: string;
+    caption?: string;
+  }
+): Promise<void> {
   if (m.from?.is_bot) return;
+  const isOwnerChat = m.chat.id === OWNER_CHAT_ID;
+  const body = m.text ?? m.caption ?? null;
 
-  const body = (m.text ?? m.caption ?? "").trim();
-  if (!body) return; // media-only messages: nothing to relay yet
+  if (!isOwnerChat) {
+    db.prepare(
+      `INSERT OR IGNORE INTO bot_direct_messages
+         (chat_id, message_id, from_id, from_first_name, from_last_name, from_username, text, date, created_at)
+       VALUES (@chat_id, @message_id, @from_id, @from_first_name, @from_last_name, @from_username, @text, @date, @created_at)`
+    ).run({
+      chat_id: m.chat.id,
+      message_id: m.message_id,
+      from_id: m.from?.id ?? null,
+      from_first_name: m.from?.first_name ?? null,
+      from_last_name: m.from?.last_name ?? null,
+      from_username: m.from?.username ?? null,
+      text: body,
+      date: m.date,
+      created_at: now(),
+    });
+  }
+
+  if (OWNER_CHAT_ID == null || isOwnerChat) return;
+  if (!body || !body.trim()) return; // media-only: archived above, nothing to relay yet
 
   const who = displayName({
     first_name: m.from?.first_name ?? null,
@@ -187,6 +226,31 @@ export async function forwardDirectMessage(m: {
     text: `📨 <b>${escapeHtml(who)}</b> wrote to the bot directly:\n\n${escapeHtml(body)}`,
     parse_mode: "HTML",
   });
+}
+
+/** Read-only view of `bot_direct_messages`, newest first. */
+export function listDirectMessages(db: Database.Database, limit = 20): unknown {
+  const rows = db
+    .prepare(
+      `SELECT chat_id, message_id, from_id, from_first_name, from_last_name, from_username, text, date
+         FROM bot_direct_messages
+        ORDER BY date DESC LIMIT @limit`
+    )
+    .all({ limit }) as DirectMessageRow[];
+  return {
+    count: rows.length,
+    messages: rows.map((r) => ({
+      chat_id: r.chat_id,
+      message_id: r.message_id,
+      from: displayName({
+        first_name: r.from_first_name,
+        last_name: r.from_last_name,
+        username: r.from_username,
+      }),
+      date: new Date(r.date * 1000).toISOString(),
+      text: r.text,
+    })),
+  };
 }
 
 /**

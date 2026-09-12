@@ -46,6 +46,6 @@ Scope for this run: call assist_pending with {\"scope\": \"$SCOPE\"}."
 
 "$CLAUDE_BIN" -p "$prompt" \
   --mcp-config "$AGENT_DIR/mcp.json" \
-  --allowedTools "mcp__tg__assist_pending,mcp__tg__assist_draft,mcp__tg__telegram_get_messages,mcp__tg__telegram_search_messages,mcp__tg__kb_search_notes" \
+  --allowedTools "mcp__tg__assist_pending,mcp__tg__assist_draft,mcp__tg__telegram_get_messages,mcp__tg__telegram_search_messages,mcp__tg__kb_search_notes,mcp__tg__kb_get_note,mcp__tg__kb_create_note,mcp__tg__kb_update_note" \
   --permission-mode acceptEdits \
   >> "$AGENT_DIR/assist.log" 2>&1

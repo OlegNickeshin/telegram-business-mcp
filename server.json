@@ -3,7 +3,7 @@
   "name": "io.github.OlegNickeshin/telegram-business-mcp",
   "title": "Telegram Business MCP",
   "description": "Self-hosted Telegram Business MCP: search chats, read files and transcripts, optionally reply.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "repository": {
     "url": "https://github.com/OlegNickeshin/telegram-business-mcp",
     "source": "github"

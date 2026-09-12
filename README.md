@@ -221,10 +221,12 @@ the bot) — see `scope` on `assist_pending`. The agent side — prompt, cron
 wrapper, setup — lives in [`agent/`](agent/).
 
 Someone can also message the bot's own account directly, outside the Business
-connection — a different chat than your business line. That is not archived
-(nothing to search or draft against), but with `ALLOW_ASSIST=1` it is relayed
-live to your DM as a plain notification, so a direct contact attempt is not
-silently dropped.
+connection — a different chat than your business line. With `ALLOW_ASSIST=1`
+this is relayed live to your DM as a plain notification, and recorded in its
+own table (read via `telegram_bot_direct_messages`) rather than the main
+archive: chat_id is the same person's id either way, but message_id is a
+separate counter per line, so merging the two would misattribute messages
+between two actually-different conversations.
 
 ### Forwarded messages and reposts
 

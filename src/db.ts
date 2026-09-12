@@ -197,6 +197,28 @@ export function migrate(db: Database.Database): void {
       value TEXT NOT NULL
     );
 
+    -- Someone messaging the bot's own account directly, outside the Business
+    -- connection. Kept apart from the messages table on purpose: the same
+    -- person's chat_id there and here can collide (chat_id is the other
+    -- party's user id either way), but message_id is a separate counter per
+    -- line, so merging the two into one transcript would misattribute
+    -- messages between two actually-different conversations.
+    CREATE TABLE IF NOT EXISTS bot_direct_messages (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id         INTEGER NOT NULL,
+      message_id      INTEGER NOT NULL,
+      from_id         INTEGER,
+      from_first_name TEXT,
+      from_last_name  TEXT,
+      from_username   TEXT,
+      text            TEXT,
+      date            INTEGER NOT NULL,
+      created_at      INTEGER NOT NULL,
+      UNIQUE (chat_id, message_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bot_direct_date ON bot_direct_messages (date DESC);
+
     -- Linear mirror: one issue per Telegram chat, one comment per message.
     -- SQLite stays the source of truth; these tables only record what has
     -- already been pushed, so a restart never re-posts anything.

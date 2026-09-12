@@ -1,5 +1,5 @@
 import { migrate, openDb, getState, setState } from "./db.js";
-import { ALLOW_ASSIST, forwardDirectMessage, handleAssistCallback } from "./assist.js";
+import { ALLOW_ASSIST, recordDirectMessage, handleAssistCallback } from "./assist.js";
 import { LOG_RAW, POLL_TIMEOUT } from "./config.js";
 import {
   ALLOWED_UPDATES,
@@ -178,21 +178,19 @@ async function main(): Promise<void> {
         const m = (u.message ?? u.edited_message)!;
         const edited = !u.message;
 
-        // Only groups are archived here. A private `message` is someone
-        // writing to the bot's own account directly: same chat.id as their
-        // business chat but a separate message_id sequence, so archiving it
-        // here would corrupt the history — Business already covers 1:1 for
-        // the archive. It is still relayed live to the owner (unless it is
-        // the owner's own chat with the bot) so a direct contact attempt is
-        // not silently dropped. Recorded as handled either way — an update we
-        // deliberately do not archive must still not be fetched forever.
+        // A private `message` is someone writing to the bot's own account
+        // directly: same chat.id as their business chat but a separate
+        // message_id sequence, so it goes in its own bot_direct_messages
+        // table rather than `messages` — Business already covers 1:1 there.
+        // Also relayed live to the owner (unless it is the owner's own chat
+        // with the bot) so a direct contact attempt is not silently dropped.
         if (m.chat.type === "private") {
           if (!edited && ALLOW_ASSIST) {
-            await forwardDirectMessage(m).catch((err) =>
-              log(`FAILED forwardDirectMessage chat.id=${m.chat.id}: ${(err as Error).message}`)
+            await recordDirectMessage(db, m).catch((err) =>
+              log(`FAILED recordDirectMessage chat.id=${m.chat.id}: ${(err as Error).message}`)
             );
           }
-          log(`[message] update_id=${u.update_id} private chat ${m.chat.id}, not archived (Business covers 1:1)`);
+          log(`[message] update_id=${u.update_id} private chat ${m.chat.id}, recorded to bot_direct_messages`);
         } else {
           const r = edited
             ? saveEditedBusinessMessage(db, m, u.update_id)

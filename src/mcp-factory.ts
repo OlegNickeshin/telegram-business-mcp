@@ -22,6 +22,7 @@ import {
   NOTE_DELETE_TOOL,
   ASSIST_PENDING_TOOL,
   ASSIST_DRAFT_TOOL,
+  BOT_DIRECT_MESSAGES_TOOL,
   MEDIA_TOOL,
   PHOTOS_TOOL,
   SHOW_PHOTO_TOOL,
@@ -903,6 +904,21 @@ export function createMcpServer(call: ToolCaller): McpServer {
         },
       },
       async (args) => json(await call(ASSIST_DRAFT_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      BOT_DIRECT_MESSAGES_TOOL,
+      {
+        title: "Messages sent to the bot's own account directly",
+        description:
+          "Messages someone sent straight to the bot's account, outside the owner's Business " +
+          "connection — a different chat than the owner's business line, kept separate because " +
+          "it is a different conversation with the same chat_id. Not covered by " +
+          "telegram_get_messages or telegram_search_messages.",
+        inputSchema: { limit: z.number().int().min(1).max(100).optional() },
+        annotations: readOnly("Messages sent to the bot's own account directly"),
+      },
+      async (args) => json(await call(BOT_DIRECT_MESSAGES_TOOL, args as Args))
     );
   }
 

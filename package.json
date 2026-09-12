@@ -1,6 +1,6 @@
 {
   "name": "telegram-business-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Self-hosted remote Telegram connector for ChatGPT, Claude and other MCP clients via the official Telegram Business API — searchable history, model-readable files, no MTProto user session.",

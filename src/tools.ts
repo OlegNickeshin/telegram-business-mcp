@@ -14,7 +14,7 @@ import {
   setReaction,
   sendMessage,
 } from "./actions.js";
-import { ALLOW_ASSIST, listPending, submitDraft, type PendingScope } from "./assist.js";
+import { ALLOW_ASSIST, listDirectMessages, listPending, submitDraft, type PendingScope } from "./assist.js";
 import {
   ALLOW_NOTES,
   createNote,
@@ -168,6 +168,7 @@ export const NOTE_DELETE_TOOL = "kb_delete_note";
 
 export const ASSIST_PENDING_TOOL = "assist_pending";
 export const ASSIST_DRAFT_TOOL = "assist_draft";
+export const BOT_DIRECT_MESSAGES_TOOL = "telegram_bot_direct_messages";
 
 export function enabledToolNames(): string[] {
   return [
@@ -178,7 +179,7 @@ export function enabledToolNames(): string[] {
     ...(ALLOW_NOTES
       ? [NOTE_SEARCH_TOOL, NOTE_GET_TOOL, NOTE_LIST_TOOL, NOTE_CREATE_TOOL, NOTE_UPDATE_TOOL, NOTE_DELETE_TOOL]
       : []),
-    ...(ALLOW_ASSIST ? [ASSIST_PENDING_TOOL, ASSIST_DRAFT_TOOL] : []),
+    ...(ALLOW_ASSIST ? [ASSIST_PENDING_TOOL, ASSIST_DRAFT_TOOL, BOT_DIRECT_MESSAGES_TOOL] : []),
   ];
 }
 
@@ -424,6 +425,11 @@ export async function runTool(
       const messageId = Number(args.message_id);
       if (!Number.isFinite(messageId)) throw new Error("message_id is required");
       return submitDraft(db, chatId, Math.trunc(messageId), String(args.draft ?? ""));
+    }
+
+    case BOT_DIRECT_MESSAGES_TOOL: {
+      if (!ALLOW_ASSIST) throw new Error(`${BOT_DIRECT_MESSAGES_TOOL} is disabled on this server`);
+      return listDirectMessages(db, clamp(args.limit, 20, 100));
     }
 
     default:
