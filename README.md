@@ -186,6 +186,8 @@ off if one server serves both.
 | `kb_create_note` | `ALLOW_NOTES=1` | **saves a note** |
 | `kb_update_note` | `ALLOW_NOTES=1` | **edits a note** (`append` to add on) |
 | `kb_delete_note` | `ALLOW_NOTES=1` | **deletes a note** |
+| `assist_pending` | `ALLOW_ASSIST=1` | chats awaiting your reply (for the draft agent) |
+| `assist_draft` | `ALLOW_ASSIST=1` | **submits a drafted reply** to your DM for approval |
 
 Times accept ISO 8601, unix seconds, `today`, `yesterday`, or a window like
 `24h` / `7d`.
@@ -217,6 +219,16 @@ Each Notion page becomes a note (the page-id hash is stripped from the title),
 internal page links are rewritten to `[[wiki links]]` so the backlink graph
 survives, and re-running is safe. Images and attachments come across as
 references, not files — this is a text store.
+
+### Assist mode (optional)
+
+`ALLOW_ASSIST=1` turns on draft-a-reply. When someone writes to you, a scheduled
+Claude Code agent reads the thread through the MCP tools, drafts a reply, and the
+bot DMs it to you with **Send / Skip** — nothing reaches the other person until
+you tap Send, and the connector holds no model of its own. The queue only
+surfaces a chat whose newest message is one you have not answered, and skips
+bots. Set `ASSIST_OWNER_CHAT_ID` to your Telegram id (press Start on the bot
+first). The agent side — prompt, cron wrapper, setup — lives in [`agent/`](agent/).
 
 ### Forwarded messages and reposts
 

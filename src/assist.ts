@@ -77,6 +77,9 @@ export function pendingForDraft(db: Database.Database, limit = 20): PendingRow[]
         WHERE m.business_connection_id <> ''
           AND m.outgoing = 0
           AND m.is_deleted = 0
+          -- Bots and notification services flood the queue and never want a
+          -- human reply; the owner drafts to people, not to Shazam.
+          AND m.from_is_bot = 0
           AND m.date <= @cutoff
           AND m.id = (
             SELECT id FROM messages m2

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tg": {
+      "type": "http",
+      "url": "https://YOUR_HOST/tg-mcp/YOUR_SECRET"
+    }
+  }
+}
