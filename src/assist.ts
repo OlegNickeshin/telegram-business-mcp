@@ -391,17 +391,23 @@ export async function notifyOwner(
   if (OWNER_CHAT_ID == null) {
     return { sent: false, note: "ASSIST_OWNER_CHAT_ID is not set" };
   }
-  if (handledIds?.length) {
-    const mark = db.prepare("UPDATE owner_inbox SET handled = 1 WHERE id = ?");
-    for (const id of handledIds) mark.run(id);
-  }
-  const stamped = reported?.length ? markReported(db, reported) : 0;
+  // Send first, record second. If Telegram throws, the error propagates and
+  // nothing is marked — so the next run re-reports rather than silently
+  // treating an undelivered digest as done. The cost of that ordering is at
+  // worst a duplicate digest on a crash between send and stamp; the cost of the
+  // reverse is a lost one, which is the worse failure.
   const { html, formatted } = toTelegramHtml(body);
   const sent = (await call<{ message_id: number }>("sendMessage", {
     chat_id: OWNER_CHAT_ID,
     text: formatted ? html : body,
     ...(formatted ? { parse_mode: "HTML" } : {}),
   })) as { message_id: number };
+
+  if (handledIds?.length) {
+    const mark = db.prepare("UPDATE owner_inbox SET handled = 1 WHERE id = ?");
+    for (const id of handledIds) mark.run(id);
+  }
+  const stamped = reported?.length ? markReported(db, reported) : 0;
   return { sent: true, message_id: sent.message_id, marked_handled: handledIds?.length ?? 0, marked_reported: stamped };
 }
 
