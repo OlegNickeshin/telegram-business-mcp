@@ -953,6 +953,8 @@ export function createMcpServer(call: ToolCaller): McpServer {
           text: z.string().min(1).describe("What to send to the owner."),
           handled_ids: z.array(z.number().int()).optional()
             .describe("ids from assist_owner_inbox to mark handled."),
+          reported: z.array(z.object({ chat_id: z.number().int(), message_id: z.number().int() })).optional()
+            .describe("Pending items you listed in this digest, so the next digest treats them as seen."),
         },
         annotations: {
           title: "Message the owner",

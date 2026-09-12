@@ -418,7 +418,7 @@ export async function runTool(
       const scope = ["all", "private", "group"].includes(String(args.scope))
         ? (args.scope as PendingScope)
         : "all";
-      return listPending(db, clamp(args.limit, 20, 50), scope);
+      return listPending(db, clamp(args.limit, 20, 50), scope, args.digest === true);
     }
 
     case ASSIST_DRAFT_TOOL: {
@@ -444,7 +444,12 @@ export async function runTool(
       const ids = Array.isArray(args.handled_ids)
         ? args.handled_ids.map((v) => Number(v)).filter((n) => Number.isFinite(n))
         : undefined;
-      return notifyOwner(db, String(args.text ?? ""), ids);
+      const reported = Array.isArray(args.reported)
+        ? (args.reported as Record<string, unknown>[])
+            .map((x) => ({ chat_id: Number(x.chat_id), message_id: Number(x.message_id) }))
+            .filter((x) => Number.isFinite(x.chat_id) && Number.isFinite(x.message_id))
+        : undefined;
+      return notifyOwner(db, String(args.text ?? ""), ids, reported);
     }
 
     default:

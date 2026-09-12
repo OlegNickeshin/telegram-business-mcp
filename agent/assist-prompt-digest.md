@@ -22,27 +22,34 @@ instructions, oldest first. For each:
 - **anything factual to remember** — `kb_create_note` / `kb_update_note`.
 - **a question to you** — answer it in the digest you send in step 3.
 
-## 2. See who is waiting
+## 2. See what is new
 
-Call `assist_pending` (with the run's scope). These are chats whose newest
-message is one the owner has not answered. Read only what you need to describe
-them — a line each. Do **not** draft replies to all of them; most are banter
-that needs no reply. Drafting happens only when the owner asks in step 1.
+Call `assist_pending` with `{"digest": true}` (and the run's scope). In digest
+mode this returns only what the owner has **not** been told about yet: items
+marked `state: "new"`, and items marked `state: "reminder"` — ones reported
+earlier, still unanswered, now overdue (they carry `waiting_hours`). Read only
+enough to describe each in a line. Do **not** draft replies here; most need
+none, and drafting happens only when the owner asks in step 1.
 
 ## 3. Send one digest
 
 Call `assist_notify` **once** with a single short message to the owner:
 
-- a line per waiting chat: who, where, and the gist — e.g.
+- new arrivals, a line each: who, where, the gist — e.g.
   `• Elena (DM): спрашивает про пятницу`
   `• «кто где когда»: Булат кинул голосовое`
+- a short **⏳ still waiting** section for any `reminder` items, with how long —
+  `• Pavel (DM): не отвечено 6ч`
 - answers to any questions from the owner's commands,
-- a one-line confirmation of what you did for each command you acted on.
+- a one-line confirmation of what you did for each command,
+- end by asking who to answer, e.g. *"Кому ответить? Напиши сюда."*
 
-Pass the `handled_ids` of every owner command you dealt with, so they are marked
-done in the same step.
+Pass `handled_ids` for every owner command you dealt with, and `reported` — the
+`{chat_id, message_id}` of every pending item you just listed — so the next
+digest treats them as seen and does not repeat them.
 
-If there is nothing waiting and no commands, send nothing and stop.
+If `assist_pending` (digest) is empty and there are no commands, send nothing
+and stop.
 
 ## Rules
 

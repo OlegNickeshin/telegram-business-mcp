@@ -27,6 +27,8 @@ export const ALLOW_ASSIST = (process.env.ALLOW_ASSIST ?? "0") === "1";
 export const OWNER_CHAT_ID = Number(process.env.ASSIST_OWNER_CHAT_ID ?? 0) || null;
 /** Let a burst settle before drafting: only surface incoming older than this. */
 const DEBOUNCE = Number(process.env.ASSIST_DEBOUNCE_SECONDS ?? 30);
+/** In digest mode, an item you never answered resurfaces at most this often. */
+const REMIND_AFTER = Number(process.env.ASSIST_REMIND_HOURS ?? 6) * 3600;
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -53,6 +55,18 @@ export function migrateAssist(db: Database.Database): void {
       date       INTEGER NOT NULL,
       handled    INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
+    );
+
+    -- Digest bookkeeping: which pending items the owner has already been told
+    -- about, so a digest shows only what is new, and re-surfaces an unanswered
+    -- one as a reminder rather than repeating the whole backlog every run.
+    CREATE TABLE IF NOT EXISTS assist_seen (
+      chat_id       INTEGER NOT NULL,
+      message_id    INTEGER NOT NULL,
+      first_reported INTEGER NOT NULL,
+      last_reported INTEGER NOT NULL,
+      reminders     INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (chat_id, message_id)
     );
   `);
 }
@@ -144,29 +158,92 @@ function chatName(r: PendingRow): string {
   });
 }
 
-/** What the agent gets: who wrote, what they said, where. */
-export function listPending(db: Database.Database, limit = 20, scope: PendingScope = "all"): unknown {
-  const rows = pendingForDraft(db, limit, scope);
+function mapPending(r: PendingRow, state?: string, waitingSeconds?: number) {
   return {
-    count: rows.length,
-    debounce_seconds: DEBOUNCE,
-    owner_dm_configured: OWNER_CHAT_ID != null,
-    pending: rows.map((r) => ({
-      chat_id: r.chat_id,
-      message_id: r.message_id,
-      chat_name: chatName(r),
-      chat_type: r.chat_type,
-      from: whoFrom(r),
-      date: new Date(r.date * 1000).toISOString(),
-      text: r.text,
-      // A group draft posts as the bot, never as the owner — a different
-      // voice and stakes than a DM in the owner's name.
-      reply_as: r.chat_type === "group" || r.chat_type === "supergroup" ? "bot" : "owner",
-      // The agent should pull fuller context with telegram_get_messages before
-      // drafting, and telegram_search_messages / kb_search_notes for facts.
-      hint: "Read the thread with telegram_get_messages before drafting.",
-    })),
+    chat_id: r.chat_id,
+    message_id: r.message_id,
+    chat_name: chatName(r),
+    chat_type: r.chat_type,
+    from: whoFrom(r),
+    date: new Date(r.date * 1000).toISOString(),
+    text: r.text,
+    // A group draft posts as the bot, never as the owner — a different voice
+    // and stakes than a DM in the owner's name.
+    reply_as: r.chat_type === "group" || r.chat_type === "supergroup" ? "bot" : "owner",
+    ...(state ? { state } : {}),
+    ...(waitingSeconds != null ? { waiting_hours: Math.round((waitingSeconds / 3600) * 10) / 10 } : {}),
+    hint: "Read the thread with telegram_get_messages before drafting.",
   };
+}
+
+/**
+ * What the agent gets. In `digest` mode it returns only what the owner has not
+ * been told about yet — items never reported ("new"), and items reported long
+ * enough ago and still unanswered ("reminder") — so a digest never repeats the
+ * whole backlog. In plain mode it returns everything pending, as before.
+ */
+export function listPending(
+  db: Database.Database,
+  limit = 20,
+  scope: PendingScope = "all",
+  digest = false
+): unknown {
+  if (!digest) {
+    const rows = pendingForDraft(db, limit, scope);
+    return {
+      count: rows.length,
+      debounce_seconds: DEBOUNCE,
+      owner_dm_configured: OWNER_CHAT_ID != null,
+      pending: rows.map((r) => mapPending(r)),
+    };
+  }
+
+  // Scan more than the limit, since many pending items may be filtered out as
+  // already-reported, then keep the first `limit` that are new or due.
+  const rows = pendingForDraft(db, 200, scope);
+  const seenStmt = db.prepare(
+    "SELECT last_reported FROM assist_seen WHERE chat_id = ? AND message_id = ?"
+  );
+  const t = now();
+  const out: ReturnType<typeof mapPending>[] = [];
+  for (const r of rows) {
+    const seen = seenStmt.get(r.chat_id, r.message_id) as { last_reported: number } | undefined;
+    let state: string;
+    if (!seen) state = "new";
+    else if (t - seen.last_reported >= REMIND_AFTER) state = "reminder";
+    else continue; // reported recently and not yet due to remind
+    out.push(mapPending(r, state, t - r.date));
+    if (out.length >= limit) break;
+  }
+  return {
+    count: out.length,
+    mode: "digest",
+    remind_after_hours: REMIND_AFTER / 3600,
+    owner_dm_configured: OWNER_CHAT_ID != null,
+    pending: out,
+  };
+}
+
+/**
+ * Stamp items as reported in a digest, so the next digest treats them as
+ * already-seen (and only re-surfaces them as a reminder after REMIND_AFTER).
+ */
+export function markReported(db: Database.Database, items: { chat_id: number; message_id: number }[]): number {
+  const t = now();
+  const up = db.prepare(
+    `INSERT INTO assist_seen (chat_id, message_id, first_reported, last_reported, reminders)
+     VALUES (?, ?, ?, ?, 0)
+     ON CONFLICT(chat_id, message_id) DO UPDATE SET
+       last_reported = excluded.last_reported, reminders = reminders + 1`
+  );
+  let n = 0;
+  for (const it of items) {
+    if (Number.isFinite(it.chat_id) && Number.isFinite(it.message_id)) {
+      up.run(it.chat_id, it.message_id, t, t);
+      n++;
+    }
+  }
+  return n;
 }
 
 interface DirectMessageRow {
@@ -306,7 +383,8 @@ export function listOwnerInbox(db: Database.Database, limit = 20): unknown {
 export async function notifyOwner(
   db: Database.Database,
   text: string,
-  handledIds?: number[]
+  handledIds?: number[],
+  reported?: { chat_id: number; message_id: number }[]
 ): Promise<unknown> {
   const body = String(text ?? "").trim();
   if (!body) throw new Error("text is empty");
@@ -317,13 +395,14 @@ export async function notifyOwner(
     const mark = db.prepare("UPDATE owner_inbox SET handled = 1 WHERE id = ?");
     for (const id of handledIds) mark.run(id);
   }
+  const stamped = reported?.length ? markReported(db, reported) : 0;
   const { html, formatted } = toTelegramHtml(body);
   const sent = (await call<{ message_id: number }>("sendMessage", {
     chat_id: OWNER_CHAT_ID,
     text: formatted ? html : body,
     ...(formatted ? { parse_mode: "HTML" } : {}),
   })) as { message_id: number };
-  return { sent: true, message_id: sent.message_id, marked_handled: handledIds?.length ?? 0 };
+  return { sent: true, message_id: sent.message_id, marked_handled: handledIds?.length ?? 0, marked_reported: stamped };
 }
 
 /**

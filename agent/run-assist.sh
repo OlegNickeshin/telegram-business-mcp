@@ -23,10 +23,11 @@ MODE="${ASSIST_MODE:-draft}"   # draft (per-item + buttons) | digest (one summar
 : "${MCP_URL:?set MCP_URL to the connector URL including the secret}"
 
 # --- cheap check: how many pending? ---------------------------------------
+digest_arg=false; [ "$MODE" = "digest" ] && digest_arg=true
 pending_json=$(curl -s -X POST "$MCP_URL" \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"assist_pending\",\"arguments\":{\"scope\":\"$SCOPE\"}}}")
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"assist_pending\",\"arguments\":{\"scope\":\"$SCOPE\",\"digest\":$digest_arg}}}")
 
 count=$(printf '%s' "$pending_json" \
   | grep -oE 'count[\\"]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
