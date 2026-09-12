@@ -15,6 +15,15 @@ import {
   sendMessage,
 } from "./actions.js";
 import {
+  ALLOW_NOTES,
+  createNote,
+  updateNote,
+  getNote,
+  listNotes,
+  searchNotes,
+  deleteNote,
+} from "./notes.js";
+import {
   clamp,
   displayName,
   findChat,
@@ -149,12 +158,22 @@ export const READ_TOOL = "telegram_mark_read";
 export const REACT_TOOL = "telegram_set_reaction";
 export const FORGET_TOOL = "telegram_forget";
 
+export const NOTE_SEARCH_TOOL = "kb_search_notes";
+export const NOTE_GET_TOOL = "kb_get_note";
+export const NOTE_LIST_TOOL = "kb_list_notes";
+export const NOTE_CREATE_TOOL = "kb_create_note";
+export const NOTE_UPDATE_TOOL = "kb_update_note";
+export const NOTE_DELETE_TOOL = "kb_delete_note";
+
 export function enabledToolNames(): string[] {
   return [
     ...TOOL_NAMES,
     ...(ALLOW_MEDIA ? [MEDIA_TOOL, PHOTOS_TOOL, SHOW_PHOTO_TOOL, FILE_TOOL] : []),
     ...(ALLOW_SEND ? [SEND_TOOL, SEND_MEDIA_TOOL, REACT_TOOL, EDIT_TOOL, READ_TOOL] : []),
     ...(ALLOW_FORGET ? [FORGET_TOOL] : []),
+    ...(ALLOW_NOTES
+      ? [NOTE_SEARCH_TOOL, NOTE_GET_TOOL, NOTE_LIST_TOOL, NOTE_CREATE_TOOL, NOTE_UPDATE_TOOL, NOTE_DELETE_TOOL]
+      : []),
   ];
 }
 
@@ -174,6 +193,15 @@ function requireChatId(args: Args): number {
  * server. The five read tools touch only SQLite. The two optional ones reach
  * the Bot API and are refused unless their env switch is on.
  */
+/** A note is addressed by numeric id or by exact title. */
+function noteRef(args: Args): { id?: number; title?: string } {
+  const id = args.id != null ? Number(args.id) : undefined;
+  if (id != null && Number.isFinite(id)) return { id: Math.trunc(id) };
+  const title = args.title != null ? String(args.title) : undefined;
+  if (title) return { title };
+  throw new Error("give the note's id or its exact title");
+}
+
 export async function runTool(
   db: Database.Database,
   name: string,
@@ -336,6 +364,45 @@ export async function runTool(
       // from "before X" to "everything in this chat".
       const before = requireSince(args.before, "before");
       return forget(db, { chatId, before });
+    }
+
+    case NOTE_SEARCH_TOOL: {
+      if (!ALLOW_NOTES) throw new Error(`${NOTE_SEARCH_TOOL} is disabled on this server`);
+      const tag = args.tag != null ? String(args.tag) : undefined;
+      return searchNotes(db, String(args.query ?? ""), tag, clamp(args.limit, 20, 100));
+    }
+
+    case NOTE_GET_TOOL: {
+      if (!ALLOW_NOTES) throw new Error(`${NOTE_GET_TOOL} is disabled on this server`);
+      return getNote(db, noteRef(args));
+    }
+
+    case NOTE_LIST_TOOL: {
+      if (!ALLOW_NOTES) throw new Error(`${NOTE_LIST_TOOL} is disabled on this server`);
+      const tag = args.tag != null ? String(args.tag) : undefined;
+      return listNotes(db, tag, clamp(args.limit, 30, 200));
+    }
+
+    case NOTE_CREATE_TOOL: {
+      if (!ALLOW_NOTES) throw new Error(`${NOTE_CREATE_TOOL} is disabled on this server`);
+      const title = String(args.title ?? "").trim();
+      if (!title) throw new Error("title is required");
+      return createNote(db, title, String(args.body ?? ""), args.tags);
+    }
+
+    case NOTE_UPDATE_TOOL: {
+      if (!ALLOW_NOTES) throw new Error(`${NOTE_UPDATE_TOOL} is disabled on this server`);
+      return updateNote(db, noteRef(args), {
+        title: args.title != null ? String(args.title) : undefined,
+        body: args.body != null ? String(args.body) : undefined,
+        tags: args.tags,
+        append: args.append === true,
+      });
+    }
+
+    case NOTE_DELETE_TOOL: {
+      if (!ALLOW_NOTES) throw new Error(`${NOTE_DELETE_TOOL} is disabled on this server`);
+      return deleteNote(db, noteRef(args));
     }
 
     default:

@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { migrateNotes } from "./notes.js";
 import fs from "node:fs";
 import path from "node:path";
 import { DB_PATH } from "./config.js";
@@ -330,6 +331,9 @@ export function migrate(db: Database.Database): void {
       INSERT INTO messages_fts(rowid, body) VALUES (new.id, fts_body(new.text, new.caption, new.transcript));
     END;
   `);
+
+  // Optional knowledge-base module (kb_* tables). Harmless where unused.
+  migrateNotes(db);
 }
 
 export function getState(db: Database.Database, key: string): string | null {

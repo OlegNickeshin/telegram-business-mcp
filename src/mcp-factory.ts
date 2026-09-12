@@ -8,10 +8,17 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ALLOW_FORGET, ALLOW_MEDIA, ALLOW_SEND } from "./actions.js";
+import { ALLOW_NOTES } from "./notes.js";
 import {
   EDIT_TOOL,
   FILE_TOOL,
   FORGET_TOOL,
+  NOTE_SEARCH_TOOL,
+  NOTE_GET_TOOL,
+  NOTE_LIST_TOOL,
+  NOTE_CREATE_TOOL,
+  NOTE_UPDATE_TOOL,
+  NOTE_DELETE_TOOL,
   MEDIA_TOOL,
   PHOTOS_TOOL,
   SHOW_PHOTO_TOOL,
@@ -722,6 +729,128 @@ export function createMcpServer(call: ToolCaller): McpServer {
         },
       },
       async (args) => json(await call(FORGET_TOOL, args as Args))
+    );
+  }
+
+  if (ALLOW_NOTES) {
+    server.registerTool(
+      NOTE_SEARCH_TOOL,
+      {
+        title: "Search your notes",
+        description:
+          "Full-text search over your personal knowledge base (notes you keep here). " +
+          "The last word is prefix-matched. Optionally restrict to a tag. Nothing leaves " +
+          "the server. With an empty query it lists recent notes.",
+        inputSchema: {
+          query: z.string().describe("Words to search for. Empty lists recent notes."),
+          tag: z.string().optional().describe("Restrict to notes carrying this tag."),
+          limit: z.number().int().min(1).max(100).optional(),
+        },
+        annotations: readOnly("Search your notes"),
+      },
+      async (args) => json(await call(NOTE_SEARCH_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      NOTE_GET_TOOL,
+      {
+        title: "Read a note",
+        description:
+          "Read one note in full — its body, tags, the notes it links to via [[Title]], " +
+          "and the notes that link back to it. Address it by id or by exact title.",
+        inputSchema: {
+          id: z.number().int().optional().describe("Note id."),
+          title: z.string().optional().describe("Exact note title, if you do not have the id."),
+        },
+        annotations: readOnly("Read a note"),
+      },
+      async (args) => json(await call(NOTE_GET_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      NOTE_LIST_TOOL,
+      {
+        title: "List notes",
+        description: "List notes, newest first. Optionally only those with a given tag.",
+        inputSchema: {
+          tag: z.string().optional().describe("Only notes with this tag."),
+          limit: z.number().int().min(1).max(200).optional(),
+        },
+        annotations: readOnly("List notes"),
+      },
+      async (args) => json(await call(NOTE_LIST_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      NOTE_CREATE_TOOL,
+      {
+        title: "Create a note",
+        description:
+          "Save a new note to your knowledge base. Titles are unique; if one exists, use " +
+          "kb_update_note instead. The body is markdown and may reference other notes with " +
+          "[[Title]]. Tags help you find it later.",
+        inputSchema: {
+          title: z.string().min(1).describe("Unique title for the note."),
+          body: z.string().optional().describe("Markdown body. May contain [[links]] to other notes."),
+          tags: z.array(z.string()).optional().describe("Tags, e.g. [\"work\", \"idea\"]."),
+        },
+        annotations: {
+          title: "Create a note",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (args) => json(await call(NOTE_CREATE_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      NOTE_UPDATE_TOOL,
+      {
+        title: "Update a note",
+        description:
+          "Change an existing note. Address it by id or exact title. Pass only what changes. " +
+          "Set append=true to add the given body below what is already there — the natural " +
+          "'add this to my notes' path — otherwise the body is replaced.",
+        inputSchema: {
+          id: z.number().int().optional().describe("Note id."),
+          title: z.string().optional().describe("Current exact title (to find it), or the new title."),
+          body: z.string().optional().describe("New body, or text to append."),
+          append: z.boolean().optional().describe("Append body instead of replacing it."),
+          tags: z.array(z.string()).optional().describe("Replace the tag list."),
+        },
+        annotations: {
+          title: "Update a note",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (args) => json(await call(NOTE_UPDATE_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      NOTE_DELETE_TOOL,
+      {
+        title: "Delete a note",
+        description:
+          "Permanently delete a note from your knowledge base, by id or exact title. " +
+          "This cannot be undone.",
+        inputSchema: {
+          id: z.number().int().optional().describe("Note id."),
+          title: z.string().optional().describe("Exact note title."),
+        },
+        annotations: {
+          title: "Delete a note",
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (args) => json(await call(NOTE_DELETE_TOOL, args as Args))
     );
   }
 

@@ -92,10 +92,19 @@ const OPTIONAL = [
   "telegram_edit_message",
   "telegram_mark_read",
   "telegram_forget",
+  "kb_search_notes",
+  "kb_get_note",
+  "kb_list_notes",
+  "kb_create_note",
+  "kb_update_note",
+  "kb_delete_note",
 ];
 // Tools that legitimately change something. Anything else matching /send|delete|…/
 // is unexpected and must be reported.
 const WRITERS = [
+  "kb_create_note",
+  "kb_update_note",
+  "kb_delete_note",
   "telegram_send_message",
   "telegram_send_media",
   "telegram_set_reaction",
