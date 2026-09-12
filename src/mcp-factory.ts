@@ -877,6 +877,10 @@ export function createMcpServer(call: ToolCaller): McpServer {
             .enum(["all", "private", "group"])
             .optional()
             .describe("private = 1:1 DMs (reply as owner); group = groups/supergroups (reply as bot); default all."),
+          digest: z
+            .boolean()
+            .optional()
+            .describe("Digest mode: only items new since the last digest, plus overdue reminders."),
         },
         annotations: readOnly("Incoming messages awaiting a reply"),
       },

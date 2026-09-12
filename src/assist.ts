@@ -109,9 +109,16 @@ const SCOPE_CONDITION: Record<PendingScope, string> = {
 export function pendingForDraft(
   db: Database.Database,
   limit = 20,
-  scope: PendingScope = "all"
+  scope: PendingScope = "all",
+  // Draft mode excludes every already-drafted item (don't send a second card).
+  // Digest mode excludes only ones actually closed — sent or skipped — so a
+  // draft still waiting for the owner's approval is still surfaced.
+  digestView = false
 ): PendingRow[] {
   const cutoff = now() - DEBOUNCE;
+  const draftExclusion = digestView
+    ? "d.chat_id = m.chat_id AND d.message_id = m.message_id AND d.status IN ('sent', 'skipped')"
+    : "d.chat_id = m.chat_id AND d.message_id = m.message_id";
   return db
     .prepare(
       `SELECT m.chat_id, m.message_id, m.date, m.text,
@@ -136,7 +143,7 @@ export function pendingForDraft(
           )
           AND NOT EXISTS (
             SELECT 1 FROM assist_drafts d
-             WHERE d.chat_id = m.chat_id AND d.message_id = m.message_id
+             WHERE ${draftExclusion}
           )
         ORDER BY m.date DESC LIMIT @limit`
     )
@@ -207,7 +214,7 @@ export function listPending(
 
   // Scan more than the limit, since many pending items may be filtered out as
   // already-reported, then keep the first `limit` that are new or due.
-  const rows = pendingForDraft(db, 200, scope);
+  const rows = pendingForDraft(db, 200, scope, true);
   const seenStmt = db.prepare(
     "SELECT last_reported FROM assist_seen WHERE chat_id = ? AND message_id = ?"
   );
