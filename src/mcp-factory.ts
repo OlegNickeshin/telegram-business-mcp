@@ -9,6 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ALLOW_FORGET, ALLOW_MEDIA, ALLOW_SEND } from "./actions.js";
 import { ALLOW_NOTES } from "./notes.js";
+import { ALLOW_ASSIST } from "./assist.js";
 import {
   EDIT_TOOL,
   FILE_TOOL,
@@ -19,6 +20,8 @@ import {
   NOTE_CREATE_TOOL,
   NOTE_UPDATE_TOOL,
   NOTE_DELETE_TOOL,
+  ASSIST_PENDING_TOOL,
+  ASSIST_DRAFT_TOOL,
   MEDIA_TOOL,
   PHOTOS_TOOL,
   SHOW_PHOTO_TOOL,
@@ -851,6 +854,48 @@ export function createMcpServer(call: ToolCaller): McpServer {
         },
       },
       async (args) => json(await call(NOTE_DELETE_TOOL, args as Args))
+    );
+  }
+
+  if (ALLOW_ASSIST) {
+    server.registerTool(
+      ASSIST_PENDING_TOOL,
+      {
+        title: "Incoming messages awaiting a reply",
+        description:
+          "List conversations where the newest message is one written to the owner that the " +
+          "owner has not answered — the ball is in the owner's court. Use this to decide what " +
+          "to draft. For each, read the fuller thread with telegram_get_messages, and pull " +
+          "any needed facts with telegram_search_messages or kb_search_notes, before drafting.",
+        inputSchema: { limit: z.number().int().min(1).max(50).optional() },
+        annotations: readOnly("Incoming messages awaiting a reply"),
+      },
+      async (args) => json(await call(ASSIST_PENDING_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      ASSIST_DRAFT_TOOL,
+      {
+        title: "Submit a drafted reply for approval",
+        description:
+          "Submit a reply you drafted for an incoming message. This does NOT send it to the " +
+          "other person — it DMs the draft to the owner with Send / Skip buttons, and the " +
+          "reply goes out only if the owner taps Send. Pass the chat_id and message_id from " +
+          "assist_pending, and your drafted text.",
+        inputSchema: {
+          chat_id: z.number().int().describe("Chat the reply is for."),
+          message_id: z.number().int().describe("The incoming message being answered."),
+          draft: z.string().min(1).describe("The reply text you drafted, in the owner's voice."),
+        },
+        annotations: {
+          title: "Submit a drafted reply for approval",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        },
+      },
+      async (args) => json(await call(ASSIST_DRAFT_TOOL, args as Args))
     );
   }
 

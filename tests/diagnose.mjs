@@ -98,10 +98,13 @@ const OPTIONAL = [
   "kb_create_note",
   "kb_update_note",
   "kb_delete_note",
+  "assist_pending",
+  "assist_draft",
 ];
 // Tools that legitimately change something. Anything else matching /send|delete|…/
 // is unexpected and must be reported.
 const WRITERS = [
+  "assist_draft",
   "kb_create_note",
   "kb_update_note",
   "kb_delete_note",

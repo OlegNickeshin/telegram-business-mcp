@@ -1,4 +1,5 @@
 import { migrate, openDb, getState, setState } from "./db.js";
+import { ALLOW_ASSIST, handleAssistCallback } from "./assist.js";
 import { LOG_RAW, POLL_TIMEOUT } from "./config.js";
 import {
   ALLOWED_UPDATES,
@@ -198,6 +199,15 @@ async function main(): Promise<void> {
               `body="${preview(m.text ?? m.caption)}"`
           );
         }
+        } else if ((u as { callback_query?: unknown }).callback_query) {
+          // Assist mode: the owner tapped Send/Skip under a drafted reply.
+          const cb = (u as unknown as { callback_query: Parameters<typeof handleAssistCallback>[1] }).callback_query;
+          if (ALLOW_ASSIST) {
+            const handled = await handleAssistCallback(db, cb);
+            log(`[callback_query] update_id=${u.update_id} ${handled ? "handled" : "ignored"}`);
+          } else {
+            log(`[callback_query] update_id=${u.update_id} (assist disabled)`);
+          }
         } else {
           log(`[${type}] update_id=${u.update_id} (stored raw, no handler)`);
         }

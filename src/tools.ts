@@ -14,6 +14,7 @@ import {
   setReaction,
   sendMessage,
 } from "./actions.js";
+import { ALLOW_ASSIST, listPending, submitDraft } from "./assist.js";
 import {
   ALLOW_NOTES,
   createNote,
@@ -165,6 +166,9 @@ export const NOTE_CREATE_TOOL = "kb_create_note";
 export const NOTE_UPDATE_TOOL = "kb_update_note";
 export const NOTE_DELETE_TOOL = "kb_delete_note";
 
+export const ASSIST_PENDING_TOOL = "assist_pending";
+export const ASSIST_DRAFT_TOOL = "assist_draft";
+
 export function enabledToolNames(): string[] {
   return [
     ...TOOL_NAMES,
@@ -174,6 +178,7 @@ export function enabledToolNames(): string[] {
     ...(ALLOW_NOTES
       ? [NOTE_SEARCH_TOOL, NOTE_GET_TOOL, NOTE_LIST_TOOL, NOTE_CREATE_TOOL, NOTE_UPDATE_TOOL, NOTE_DELETE_TOOL]
       : []),
+    ...(ALLOW_ASSIST ? [ASSIST_PENDING_TOOL, ASSIST_DRAFT_TOOL] : []),
   ];
 }
 
@@ -403,6 +408,19 @@ export async function runTool(
     case NOTE_DELETE_TOOL: {
       if (!ALLOW_NOTES) throw new Error(`${NOTE_DELETE_TOOL} is disabled on this server`);
       return deleteNote(db, noteRef(args));
+    }
+
+    case ASSIST_PENDING_TOOL: {
+      if (!ALLOW_ASSIST) throw new Error(`${ASSIST_PENDING_TOOL} is disabled on this server`);
+      return listPending(db, clamp(args.limit, 20, 50));
+    }
+
+    case ASSIST_DRAFT_TOOL: {
+      if (!ALLOW_ASSIST) throw new Error(`${ASSIST_DRAFT_TOOL} is disabled on this server`);
+      const chatId = requireChatId(args);
+      const messageId = Number(args.message_id);
+      if (!Number.isFinite(messageId)) throw new Error("message_id is required");
+      return submitDraft(db, chatId, Math.trunc(messageId), String(args.draft ?? ""));
     }
 
     default:

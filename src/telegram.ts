@@ -60,6 +60,8 @@ export const ALLOWED_UPDATES = [
   // the bot is a member with privacy mode disabled.
   "message",
   "edited_message",
+  // Assist mode: the owner taps Send/Skip under a drafted reply.
+  "callback_query",
 ] as const;
 
 export interface TgUser {
