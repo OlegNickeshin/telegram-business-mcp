@@ -100,11 +100,15 @@ const OPTIONAL = [
   "kb_delete_note",
   "assist_pending",
   "assist_draft",
+  "telegram_bot_direct_messages",
+  "assist_owner_inbox",
+  "assist_notify",
 ];
 // Tools that legitimately change something. Anything else matching /send|delete|…/
 // is unexpected and must be reported.
 const WRITERS = [
   "assist_draft",
+  "assist_notify",
   "kb_create_note",
   "kb_update_note",
   "kb_delete_note",

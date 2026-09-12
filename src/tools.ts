@@ -14,7 +14,7 @@ import {
   setReaction,
   sendMessage,
 } from "./actions.js";
-import { ALLOW_ASSIST, listDirectMessages, listPending, submitDraft, type PendingScope } from "./assist.js";
+import { ALLOW_ASSIST, listDirectMessages, listOwnerInbox, listPending, notifyOwner, submitDraft, type PendingScope } from "./assist.js";
 import {
   ALLOW_NOTES,
   createNote,
@@ -169,6 +169,8 @@ export const NOTE_DELETE_TOOL = "kb_delete_note";
 export const ASSIST_PENDING_TOOL = "assist_pending";
 export const ASSIST_DRAFT_TOOL = "assist_draft";
 export const BOT_DIRECT_MESSAGES_TOOL = "telegram_bot_direct_messages";
+export const ASSIST_INBOX_TOOL = "assist_owner_inbox";
+export const ASSIST_NOTIFY_TOOL = "assist_notify";
 
 export function enabledToolNames(): string[] {
   return [
@@ -179,7 +181,7 @@ export function enabledToolNames(): string[] {
     ...(ALLOW_NOTES
       ? [NOTE_SEARCH_TOOL, NOTE_GET_TOOL, NOTE_LIST_TOOL, NOTE_CREATE_TOOL, NOTE_UPDATE_TOOL, NOTE_DELETE_TOOL]
       : []),
-    ...(ALLOW_ASSIST ? [ASSIST_PENDING_TOOL, ASSIST_DRAFT_TOOL, BOT_DIRECT_MESSAGES_TOOL] : []),
+    ...(ALLOW_ASSIST ? [ASSIST_PENDING_TOOL, ASSIST_DRAFT_TOOL, BOT_DIRECT_MESSAGES_TOOL, ASSIST_INBOX_TOOL, ASSIST_NOTIFY_TOOL] : []),
   ];
 }
 
@@ -430,6 +432,19 @@ export async function runTool(
     case BOT_DIRECT_MESSAGES_TOOL: {
       if (!ALLOW_ASSIST) throw new Error(`${BOT_DIRECT_MESSAGES_TOOL} is disabled on this server`);
       return listDirectMessages(db, clamp(args.limit, 20, 100));
+    }
+
+    case ASSIST_INBOX_TOOL: {
+      if (!ALLOW_ASSIST) throw new Error(`${ASSIST_INBOX_TOOL} is disabled on this server`);
+      return listOwnerInbox(db, clamp(args.limit, 20, 50));
+    }
+
+    case ASSIST_NOTIFY_TOOL: {
+      if (!ALLOW_ASSIST) throw new Error(`${ASSIST_NOTIFY_TOOL} is disabled on this server`);
+      const ids = Array.isArray(args.handled_ids)
+        ? args.handled_ids.map((v) => Number(v)).filter((n) => Number.isFinite(n))
+        : undefined;
+      return notifyOwner(db, String(args.text ?? ""), ids);
     }
 
     default:

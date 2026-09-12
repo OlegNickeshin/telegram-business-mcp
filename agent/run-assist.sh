@@ -19,6 +19,7 @@ set -euo pipefail
 AGENT_DIR="${AGENT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 SCOPE="${SCOPE:-all}"
+MODE="${ASSIST_MODE:-draft}"   # draft (per-item + buttons) | digest (one summary, converse in DM)
 : "${MCP_URL:?set MCP_URL to the connector URL including the secret}"
 
 # --- cheap check: how many pending? ---------------------------------------
@@ -31,8 +32,19 @@ count=$(printf '%s' "$pending_json" \
   | grep -oE 'count[\\"]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
 count=${count:-0}
 
-if [ "$count" -eq 0 ]; then
-  exit 0   # quiet inbox: no model spend
+# In digest mode an owner command should also wake the agent, even on a quiet inbox.
+inbox=0
+if [ "$MODE" = "digest" ]; then
+  inbox_json=$(curl -s -X POST "$MCP_URL" \
+    -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"assist_owner_inbox","arguments":{}}}')
+  inbox=$(printf '%s' "$inbox_json" | grep -oE 'count[\\"]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
+  inbox=${inbox:-0}
+fi
+
+if [ "$count" -eq 0 ] && [ "$inbox" -eq 0 ]; then
+  exit 0   # nothing waiting and no commands: no model spend
 fi
 
 echo "$(date -u +%FT%TZ) assist: $count pending (scope=$SCOPE), running agent"
@@ -40,12 +52,21 @@ echo "$(date -u +%FT%TZ) assist: $count pending (scope=$SCOPE), running agent"
 # --- spend a run only when there is work ----------------------------------
 # Headless Claude Code, pointed at the connector, allowed only the tools the
 # agent needs. Adjust the flags to your Claude Code version if needed.
-prompt="$(cat "$AGENT_DIR/assist-prompt.md")
+common_tools="mcp__tg__assist_pending,mcp__tg__assist_draft,mcp__tg__telegram_find_chat,mcp__tg__telegram_get_messages,mcp__tg__telegram_search_messages,mcp__tg__kb_search_notes,mcp__tg__kb_get_note,mcp__tg__kb_create_note,mcp__tg__kb_update_note"
+if [ "$MODE" = "digest" ]; then
+  prompt_file="$AGENT_DIR/assist-prompt-digest.md"
+  tools="$common_tools,mcp__tg__assist_owner_inbox,mcp__tg__assist_notify"
+else
+  prompt_file="$AGENT_DIR/assist-prompt.md"
+  tools="$common_tools"
+fi
+
+prompt="$(cat "$prompt_file")
 
 Scope for this run: call assist_pending with {\"scope\": \"$SCOPE\"}."
 
 "$CLAUDE_BIN" -p "$prompt" \
   --mcp-config "$AGENT_DIR/mcp.json" \
-  --allowedTools "mcp__tg__assist_pending,mcp__tg__assist_draft,mcp__tg__telegram_get_messages,mcp__tg__telegram_search_messages,mcp__tg__kb_search_notes,mcp__tg__kb_get_note,mcp__tg__kb_create_note,mcp__tg__kb_update_note" \
+  --allowedTools "$tools" \
   --permission-mode acceptEdits \
   >> "$AGENT_DIR/assist.log" 2>&1

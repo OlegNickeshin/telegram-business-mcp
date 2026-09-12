@@ -19,6 +19,7 @@
 import type Database from "better-sqlite3";
 import { call } from "./telegram.js";
 import { sendMessage } from "./actions.js";
+import { toTelegramHtml } from "./markdown.js";
 import { displayName } from "./queries.js";
 
 export const ALLOW_ASSIST = (process.env.ALLOW_ASSIST ?? "0") === "1";
@@ -40,6 +41,18 @@ export function migrateAssist(db: Database.Database): void {
       created_at   INTEGER NOT NULL,
       updated_at   INTEGER NOT NULL,
       PRIMARY KEY (chat_id, message_id)
+    );
+
+    -- The owner's own replies to the bot, read by the agent as instructions
+    -- ("reply to Lena that ...", "skip", "send Bulat the estimate"). This is
+    -- the conversational side of assist: you talk back in the DM, the agent acts.
+    CREATE TABLE IF NOT EXISTS owner_inbox (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL UNIQUE,  -- the owner's DM message id, for dedup
+      text       TEXT NOT NULL,
+      date       INTEGER NOT NULL,
+      handled    INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
     );
   `);
 }
@@ -194,6 +207,17 @@ export async function recordDirectMessage(
   const isOwnerChat = m.chat.id === OWNER_CHAT_ID;
   const body = m.text ?? m.caption ?? null;
 
+  // The owner writing to the bot is a command to the agent, not a relay target.
+  if (isOwnerChat) {
+    if (body && body.trim()) {
+      db.prepare(
+        `INSERT OR IGNORE INTO owner_inbox (message_id, text, date, created_at)
+         VALUES (?, ?, ?, ?)`
+      ).run(m.message_id, body.trim(), m.date, now());
+    }
+    return;
+  }
+
   if (!isOwnerChat) {
     db.prepare(
       `INSERT OR IGNORE INTO bot_direct_messages
@@ -251,6 +275,55 @@ export function listDirectMessages(db: Database.Database, limit = 20): unknown {
       text: r.text,
     })),
   };
+}
+
+/**
+ * The owner's unhandled DM commands, oldest first so the agent acts in order.
+ * The agent reads these, does what they ask with the other tools, then marks
+ * them handled by passing their ids to assist_notify.
+ */
+export function listOwnerInbox(db: Database.Database, limit = 20): unknown {
+  const rows = db
+    .prepare(
+      "SELECT id, text, date FROM owner_inbox WHERE handled = 0 ORDER BY date ASC LIMIT ?"
+    )
+    .all(limit) as { id: number; text: string; date: number }[];
+  return {
+    count: rows.length,
+    commands: rows.map((r) => ({
+      id: r.id,
+      text: r.text,
+      date: new Date(r.date * 1000).toISOString(),
+    })),
+  };
+}
+
+/**
+ * Send a free-form message to the owner's DM — a digest of who wrote where, a
+ * confirmation, a question. Optionally mark inbox commands handled in the same
+ * call, so reading a command and acknowledging it are one step.
+ */
+export async function notifyOwner(
+  db: Database.Database,
+  text: string,
+  handledIds?: number[]
+): Promise<unknown> {
+  const body = String(text ?? "").trim();
+  if (!body) throw new Error("text is empty");
+  if (OWNER_CHAT_ID == null) {
+    return { sent: false, note: "ASSIST_OWNER_CHAT_ID is not set" };
+  }
+  if (handledIds?.length) {
+    const mark = db.prepare("UPDATE owner_inbox SET handled = 1 WHERE id = ?");
+    for (const id of handledIds) mark.run(id);
+  }
+  const { html, formatted } = toTelegramHtml(body);
+  const sent = (await call<{ message_id: number }>("sendMessage", {
+    chat_id: OWNER_CHAT_ID,
+    text: formatted ? html : body,
+    ...(formatted ? { parse_mode: "HTML" } : {}),
+  })) as { message_id: number };
+  return { sent: true, message_id: sent.message_id, marked_handled: handledIds?.length ?? 0 };
 }
 
 /**

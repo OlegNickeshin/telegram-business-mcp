@@ -23,6 +23,8 @@ import {
   ASSIST_PENDING_TOOL,
   ASSIST_DRAFT_TOOL,
   BOT_DIRECT_MESSAGES_TOOL,
+  ASSIST_INBOX_TOOL,
+  ASSIST_NOTIFY_TOOL,
   MEDIA_TOOL,
   PHOTOS_TOOL,
   SHOW_PHOTO_TOOL,
@@ -919,6 +921,48 @@ export function createMcpServer(call: ToolCaller): McpServer {
         annotations: readOnly("Messages sent to the bot's own account directly"),
       },
       async (args) => json(await call(BOT_DIRECT_MESSAGES_TOOL, args as Args))
+    );
+  }
+
+  if (ALLOW_ASSIST) {
+    server.registerTool(
+      ASSIST_INBOX_TOOL,
+      {
+        title: "The owner's replies to you",
+        description:
+          "Read the owner's own messages to the bot — their instructions back to you, like " +
+          "\"reply to Lena that I'm free Friday\", \"skip that\", or \"send Bulat the estimate\". " +
+          "Oldest first. Act on each with the other tools, then mark them handled by passing " +
+          "their ids to assist_notify. Only unhandled commands are returned.",
+        inputSchema: { limit: z.number().int().min(1).max(50).optional() },
+        annotations: readOnly("The owner's replies to you"),
+      },
+      async (args) => json(await call(ASSIST_INBOX_TOOL, args as Args))
+    );
+
+    server.registerTool(
+      ASSIST_NOTIFY_TOOL,
+      {
+        title: "Message the owner",
+        description:
+          "Send a message to the owner's Telegram DM: a digest of who wrote where, a " +
+          "confirmation of what you did, or a question. This reaches only the owner, never " +
+          "the people in the chats. Pass handled_ids to mark owner commands done in the same " +
+          "step. Markdown is converted.",
+        inputSchema: {
+          text: z.string().min(1).describe("What to send to the owner."),
+          handled_ids: z.array(z.number().int()).optional()
+            .describe("ids from assist_owner_inbox to mark handled."),
+        },
+        annotations: {
+          title: "Message the owner",
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      },
+      async (args) => json(await call(ASSIST_NOTIFY_TOOL, args as Args))
     );
   }
 
