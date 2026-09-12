@@ -21,6 +21,8 @@ import { call } from "./telegram.js";
 import { sendMessage } from "./actions.js";
 import { toTelegramHtml } from "./markdown.js";
 import { displayName } from "./queries.js";
+import { getState, setState } from "./db.js";
+import { createNote } from "./notes.js";
 
 export const ALLOW_ASSIST = (process.env.ALLOW_ASSIST ?? "0") === "1";
 /** Where the bot DMs drafts. The owner must have pressed Start on the bot. */
@@ -188,6 +190,11 @@ export function listPending(
   scope: PendingScope = "all",
   digest = false
 ): unknown {
+  // /pause stops the agent from drafting or reporting without stopping the
+  // collector: the queue looks empty, so the wrapper's cheap check skips a run.
+  if (getState(db, "assist_paused") === "1") {
+    return { count: 0, paused: true, pending: [] };
+  }
   if (!digest) {
     const rows = pendingForDraft(db, limit, scope);
     return {
@@ -284,13 +291,22 @@ export async function recordDirectMessage(
   const isOwnerChat = m.chat.id === OWNER_CHAT_ID;
   const body = m.text ?? m.caption ?? null;
 
-  // The owner writing to the bot is a command to the agent, not a relay target.
+  // The owner writing to the bot is either a slash command (handled here,
+  // instantly, no agent) or free-form text (a command for the agent, queued).
   if (isOwnerChat) {
-    if (body && body.trim()) {
+    const trimmed = body?.trim();
+    if (trimmed) {
+      if (trimmed.startsWith("/")) {
+        const reply = handleOwnerCommand(db, trimmed);
+        if (reply && OWNER_CHAT_ID != null) {
+          await call("sendMessage", { chat_id: OWNER_CHAT_ID, text: reply, parse_mode: "HTML" }).catch(() => {});
+        }
+        return;
+      }
       db.prepare(
         `INSERT OR IGNORE INTO owner_inbox (message_id, text, date, created_at)
          VALUES (?, ?, ?, ?)`
-      ).run(m.message_id, body.trim(), m.date, now());
+      ).run(m.message_id, trimmed, m.date, now());
     }
     return;
   }
@@ -474,6 +490,88 @@ export async function submitDraft(
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * A slash command the owner typed to the bot — handled here, deterministically
+ * and instantly, without waking the agent or spending a model run. Anything not
+ * starting with "/" is free-form and goes to owner_inbox for the agent instead.
+ *
+ * Returns the reply to send the owner, or null if the text is not a command.
+ */
+export function handleOwnerCommand(db: Database.Database, text: string): string | null {
+  const t = text.trim();
+  if (!t.startsWith("/")) return null;
+  const [cmd, ...rest] = t.split(/\s+/);
+  const arg = t.slice(cmd.length).trim();
+
+  switch (cmd.toLowerCase().replace(/@.*$/, "")) {
+    case "/help":
+      return [
+        "<b>Команды</b>",
+        "/pending — кто сейчас ждёт ответа",
+        "/usage — что агент наработал",
+        "/pause — заглушить драфты · /resume — включить",
+        "/note текст — быстрая заметка",
+        "",
+        "Обычным текстом («ответь Лене что…») — это команда агенту, разберёт на ближайшем прогоне.",
+      ].join("\n");
+
+    case "/pending": {
+      const rows = pendingForDraft(db, 20, "all");
+      if (!rows.length) return "Никто не ждёт ответа. 👌";
+      const lines = rows.slice(0, 15).map((r) => {
+        const who = displayName({
+          title: r.chat_title, first_name: r.chat_first_name,
+          last_name: r.chat_last_name, username: r.chat_username,
+        });
+        const from = whoFrom(r);
+        const where = r.chat_type === "group" || r.chat_type === "supergroup" ? ` (${who})` : "";
+        return `• <b>${escapeHtml(from)}</b>${escapeHtml(where)}: ${escapeHtml((r.text ?? "").slice(0, 60) || "—")}`;
+      });
+      return `<b>Ждут ответа (${rows.length}):</b>\n${lines.join("\n")}`;
+    }
+
+    case "/usage": {
+      const one = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+      const pending = pendingForDraft(db, 500, "all").length;
+      const sent = one("SELECT COUNT(*) n FROM assist_drafts WHERE status = 'sent'");
+      const skipped = one("SELECT COUNT(*) n FROM assist_drafts WHERE status = 'skipped'");
+      const waiting = one("SELECT COUNT(*) n FROM assist_drafts WHERE status = 'pending_approval'");
+      const notes = one("SELECT COUNT(*) n FROM kb_notes");
+      const paused = getState(db, "assist_paused") === "1";
+      return [
+        "<b>Агент</b>" + (paused ? " ⏸ на паузе" : ""),
+        `Ждут ответа: ${pending}`,
+        `Черновиков: отправлено ${sent}, пропущено ${skipped}, ждут тебя ${waiting}`,
+        `Заметок в базе: ${notes}`,
+        "",
+        "<i>Токены/₽ — это usage Claude Code, коннектор их не считает.</i>",
+      ].join("\n");
+    }
+
+    case "/pause":
+      setState(db, "assist_paused", "1");
+      return "⏸ Драфты на паузе. Коллектор пишет архив как обычно. /resume чтобы включить.";
+
+    case "/resume":
+      setState(db, "assist_paused", "0");
+      return "▶️ Драфты снова включены.";
+
+    case "/note": {
+      if (!arg) return "Что записать? Например: /note купить кофе";
+      try {
+        const title = arg.length <= 60 ? arg : arg.slice(0, 57).trim() + "…";
+        createNote(db, title, arg.length <= 60 ? "" : arg, ["inbox"]);
+        return `📝 Записал: <b>${escapeHtml(title)}</b>`;
+      } catch (err) {
+        return `Не смог записать: ${escapeHtml((err as Error).message)}`;
+      }
+    }
+
+    default:
+      return `Неизвестная команда ${escapeHtml(cmd)}. /help — список.`;
+  }
+}
 
 /**
  * The owner tapped a button under a draft. Approve → the reply is sent as the
