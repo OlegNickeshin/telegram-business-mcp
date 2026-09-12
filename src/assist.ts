@@ -23,7 +23,7 @@ import { displayName } from "./queries.js";
 
 export const ALLOW_ASSIST = (process.env.ALLOW_ASSIST ?? "0") === "1";
 /** Where the bot DMs drafts. The owner must have pressed Start on the bot. */
-const OWNER_CHAT_ID = Number(process.env.ASSIST_OWNER_CHAT_ID ?? 0) || null;
+export const OWNER_CHAT_ID = Number(process.env.ASSIST_OWNER_CHAT_ID ?? 0) || null;
 /** Let a burst settle before drafting: only surface incoming older than this. */
 const DEBOUNCE = Number(process.env.ASSIST_DEBOUNCE_SECONDS ?? 30);
 
@@ -56,25 +56,44 @@ interface PendingRow {
   chat_first_name: string | null;
   chat_last_name: string | null;
   chat_username: string | null;
+  chat_type: string | null;
 }
+
+export type PendingScope = "all" | "private" | "group";
+
+/** Groups have no business connection; private DMs arrive through one. */
+const SCOPE_CONDITION: Record<PendingScope, string> = {
+  all: "(m.business_connection_id <> '' OR c.type IN ('group', 'supergroup'))",
+  private: "m.business_connection_id <> ''",
+  group: "c.type IN ('group', 'supergroup')",
+};
 
 /**
  * Chats whose newest message is an incoming one the owner has not answered and
  * for which no draft has been made or skipped yet. One row per chat — the
  * message to reply to is that newest incoming.
+ *
+ * `scope` picks private DMs (business connection), groups, or both — a draft
+ * in a group goes out as the bot, never as the owner, so callers usually keep
+ * the two apart (different cadence, different prompt framing).
  */
-export function pendingForDraft(db: Database.Database, limit = 20): PendingRow[] {
+export function pendingForDraft(
+  db: Database.Database,
+  limit = 20,
+  scope: PendingScope = "all"
+): PendingRow[] {
   const cutoff = now() - DEBOUNCE;
   return db
     .prepare(
       `SELECT m.chat_id, m.message_id, m.date, m.text,
               m.from_first_name, m.from_last_name, m.from_username,
               c.title AS chat_title, c.first_name AS chat_first_name,
-              c.last_name AS chat_last_name, c.username AS chat_username
+              c.last_name AS chat_last_name, c.username AS chat_username,
+              c.type AS chat_type
          FROM messages m
          JOIN chats c ON c.chat_id = m.chat_id
          -- m must be the newest message in its chat
-        WHERE m.business_connection_id <> ''
+        WHERE ${SCOPE_CONDITION[scope]}
           AND m.outgoing = 0
           AND m.is_deleted = 0
           -- Bots and notification services flood the queue and never want a
@@ -113,8 +132,8 @@ function chatName(r: PendingRow): string {
 }
 
 /** What the agent gets: who wrote, what they said, where. */
-export function listPending(db: Database.Database, limit = 20): unknown {
-  const rows = pendingForDraft(db, limit);
+export function listPending(db: Database.Database, limit = 20, scope: PendingScope = "all"): unknown {
+  const rows = pendingForDraft(db, limit, scope);
   return {
     count: rows.length,
     debounce_seconds: DEBOUNCE,
@@ -123,14 +142,51 @@ export function listPending(db: Database.Database, limit = 20): unknown {
       chat_id: r.chat_id,
       message_id: r.message_id,
       chat_name: chatName(r),
+      chat_type: r.chat_type,
       from: whoFrom(r),
       date: new Date(r.date * 1000).toISOString(),
       text: r.text,
+      // A group draft posts as the bot, never as the owner — a different
+      // voice and stakes than a DM in the owner's name.
+      reply_as: r.chat_type === "group" || r.chat_type === "supergroup" ? "bot" : "owner",
       // The agent should pull fuller context with telegram_get_messages before
       // drafting, and telegram_search_messages / kb_search_notes for facts.
       hint: "Read the thread with telegram_get_messages before drafting.",
     })),
   };
+}
+
+/**
+ * Someone messaged the bot's own account directly — a different chat than the
+ * owner's Business line, and not part of the archive (the bot holds no model
+ * and Business already covers 1:1 with the owner). Relay it to the owner as a
+ * plain notification so it is not missed; this is not archived and the bot
+ * does not reply on the owner's behalf here.
+ */
+export async function forwardDirectMessage(m: {
+  chat: { id: number };
+  from?: { id: number; first_name?: string; last_name?: string; username?: string; is_bot?: boolean };
+  text?: string;
+  caption?: string;
+}): Promise<void> {
+  if (OWNER_CHAT_ID == null) return;
+  if (m.chat.id === OWNER_CHAT_ID) return; // the owner's own chat with the bot
+  if (m.from?.is_bot) return;
+
+  const body = (m.text ?? m.caption ?? "").trim();
+  if (!body) return; // media-only messages: nothing to relay yet
+
+  const who = displayName({
+    first_name: m.from?.first_name ?? null,
+    last_name: m.from?.last_name ?? null,
+    username: m.from?.username ?? null,
+  });
+
+  await call("sendMessage", {
+    chat_id: OWNER_CHAT_ID,
+    text: `📨 <b>${escapeHtml(who)}</b> wrote to the bot directly:\n\n${escapeHtml(body)}`,
+    parse_mode: "HTML",
+  });
 }
 
 /**

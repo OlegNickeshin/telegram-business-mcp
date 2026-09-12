@@ -45,12 +45,22 @@ names `mcp__tg__*`.
 ### 3. Schedule the agent
 
 ```cron
-* * * * * MCP_URL='https://YOUR_HOST/tg-mcp/YOUR_SECRET' /path/to/agent/run-assist.sh
+* * * * * MCP_URL='https://YOUR_HOST/tg-mcp/YOUR_SECRET' SCOPE=private /path/to/agent/run-assist.sh
+*/5 * * * * MCP_URL='https://YOUR_HOST/tg-mcp/YOUR_SECRET' SCOPE=group /path/to/agent/run-assist.sh
 ```
 
 Every minute the wrapper asks the connector how many chats are unanswered. If
 none, it exits — no Claude Code run, no tokens. Only when there is a real,
 unanswered message does it spend a run to draft.
+
+`SCOPE` picks which chats count as pending (default `all` if unset):
+
+- `private` — 1:1 DMs through the business connection. The draft is written
+  in the owner's voice and, once approved, goes out as the owner.
+- `group` — groups and supergroups. The draft posts under the **bot's own
+  name**, visible to everyone in the group, never as the owner. Groups are
+  noisier than a DM inbox, so give this scope its own, slower cron line
+  (e.g. every 5 minutes) rather than sharing the per-minute one with `private`.
 
 ## Files
 

@@ -200,25 +200,13 @@ to your contacts.
 
 ### Notes (optional knowledge base)
 
-`ALLOW_NOTES=1` adds a small self-hosted knowledge base — think Obsidian, not
-Notion: flat notes with markdown bodies, tags, `[[wiki links]]` with backlinks,
+`ALLOW_NOTES=1` adds a small self-hosted knowledge base — think Obsidian:
+flat notes with markdown bodies, tags, `[[wiki links]]` with backlinks,
 and full-text search. Same SQLite file (`kb_*` tables), same MCP endpoint, so one
 connector reads your Telegram archive and holds your notes, and the model can
 read a conversation and note something about it in the same session. Read-write
 by design; delete is the only destructive operation. Off by default — this is a
 Telegram connector first.
-
-Bring an existing Notion workspace in with one command. Export it from Notion as
-**Markdown & CSV**, unzip, and:
-
-```bash
-npm run import-notion -- path/to/export      # add --dry-run to preview
-```
-
-Each Notion page becomes a note (the page-id hash is stripped from the title),
-internal page links are rewritten to `[[wiki links]]` so the backlink graph
-survives, and re-running is safe. Images and attachments come across as
-references, not files — this is a text store.
 
 ### Assist mode (optional)
 
@@ -228,7 +216,15 @@ bot DMs it to you with **Send / Skip** — nothing reaches the other person unti
 you tap Send, and the connector holds no model of its own. The queue only
 surfaces a chat whose newest message is one you have not answered, and skips
 bots. Set `ASSIST_OWNER_CHAT_ID` to your Telegram id (press Start on the bot
-first). The agent side — prompt, cron wrapper, setup — lives in [`agent/`](agent/).
+first). Covers both 1:1 DMs (draft goes out as you) and groups (draft posts as
+the bot) — see `scope` on `assist_pending`. The agent side — prompt, cron
+wrapper, setup — lives in [`agent/`](agent/).
+
+Someone can also message the bot's own account directly, outside the Business
+connection — a different chat than your business line. That is not archived
+(nothing to search or draft against), but with `ALLOW_ASSIST=1` it is relayed
+live to your DM as a plain notification, so a direct contact attempt is not
+silently dropped.
 
 ### Forwarded messages and reposts
 

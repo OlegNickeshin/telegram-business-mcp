@@ -14,7 +14,7 @@ import {
   setReaction,
   sendMessage,
 } from "./actions.js";
-import { ALLOW_ASSIST, listPending, submitDraft } from "./assist.js";
+import { ALLOW_ASSIST, listPending, submitDraft, type PendingScope } from "./assist.js";
 import {
   ALLOW_NOTES,
   createNote,
@@ -412,7 +412,10 @@ export async function runTool(
 
     case ASSIST_PENDING_TOOL: {
       if (!ALLOW_ASSIST) throw new Error(`${ASSIST_PENDING_TOOL} is disabled on this server`);
-      return listPending(db, clamp(args.limit, 20, 50));
+      const scope = ["all", "private", "group"].includes(String(args.scope))
+        ? (args.scope as PendingScope)
+        : "all";
+      return listPending(db, clamp(args.limit, 20, 50), scope);
     }
 
     case ASSIST_DRAFT_TOOL: {

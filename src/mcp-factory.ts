@@ -866,8 +866,15 @@ export function createMcpServer(call: ToolCaller): McpServer {
           "List conversations where the newest message is one written to the owner that the " +
           "owner has not answered — the ball is in the owner's court. Use this to decide what " +
           "to draft. For each, read the fuller thread with telegram_get_messages, and pull " +
-          "any needed facts with telegram_search_messages or kb_search_notes, before drafting.",
-        inputSchema: { limit: z.number().int().min(1).max(50).optional() },
+          "any needed facts with telegram_search_messages or kb_search_notes, before drafting. " +
+          "A group's draft posts as the bot, never as the owner — see reply_as on each item.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(50).optional(),
+          scope: z
+            .enum(["all", "private", "group"])
+            .optional()
+            .describe("private = 1:1 DMs (reply as owner); group = groups/supergroups (reply as bot); default all."),
+        },
         annotations: readOnly("Incoming messages awaiting a reply"),
       },
       async (args) => json(await call(ASSIST_PENDING_TOOL, args as Args))
