@@ -100,7 +100,8 @@ const unpackTags = (packed: string) => packed.trim().split(/\s+/).filter(Boolean
 function extractLinks(body: string): string[] {
   const out = new Set<string>();
   for (const m of body.matchAll(/\[\[([^\]]+)\]\]/g)) {
-    const t = m[1].trim();
+    // [[Target]] or [[Target|shown label]] — resolve on the target only.
+    const t = m[1].split("|")[0].trim();
     if (t) out.add(t.toLowerCase());
   }
   return [...out];
