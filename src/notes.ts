@@ -1,7 +1,7 @@
 /**
- * A small knowledge base — a self-hosted, Notion-shaped notes store — living in
- * the same SQLite file and served over the same MCP endpoint as the Telegram
- * archive.
+ * A small knowledge base — a self-hosted notes store, think Obsidian — living
+ * in the same SQLite file and served over the same MCP endpoint as the
+ * Telegram archive.
  *
  * Optional, behind ALLOW_NOTES, and off by default: the published product is a
  * Telegram connector, and a personal notes store is an extra a given deployment
