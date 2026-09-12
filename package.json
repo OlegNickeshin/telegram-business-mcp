@@ -19,7 +19,8 @@
     "linear-backfill": "node --env-file=.env dist/linear-sync.js --backfill",
     "transcribe": "node --env-file=.env dist/transcribe.js",
     "transcribe-once": "node --env-file=.env dist/transcribe.js --once",
-    "import": "node --env-file=.env dist/import-export.js"
+    "import": "node --env-file=.env dist/import-export.js",
+    "import-notion": "node --env-file=.env dist/import-notion.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

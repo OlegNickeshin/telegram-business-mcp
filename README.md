@@ -180,6 +180,12 @@ off if one server serves both.
 | `telegram_edit_message` | `ALLOW_SEND=1` | rewrites one of your own |
 | `telegram_mark_read` | `ALLOW_SEND=1` | clears an unread badge |
 | `telegram_forget` | `ALLOW_FORGET=1` | **deletes from the local archive** |
+| `kb_search_notes` | `ALLOW_NOTES=1` | full-text search over your own notes |
+| `kb_get_note` | `ALLOW_NOTES=1` | one note: body, tags, links, backlinks |
+| `kb_list_notes` | `ALLOW_NOTES=1` | recent notes, optionally by tag |
+| `kb_create_note` | `ALLOW_NOTES=1` | **saves a note** |
+| `kb_update_note` | `ALLOW_NOTES=1` | **edits a note** (`append` to add on) |
+| `kb_delete_note` | `ALLOW_NOTES=1` | **deletes a note** |
 
 Times accept ISO 8601, unix seconds, `today`, `yesterday`, or a window like
 `24h` / `7d`.
@@ -189,6 +195,28 @@ A fresh install is a **read-only archive**. `ALLOW_SEND=1` enables the
 Both are off by default because the endpoint URL is effectively the credential,
 and a leaked read-only URL is a very different incident from one that can write
 to your contacts.
+
+### Notes (optional knowledge base)
+
+`ALLOW_NOTES=1` adds a small self-hosted knowledge base — think Obsidian, not
+Notion: flat notes with markdown bodies, tags, `[[wiki links]]` with backlinks,
+and full-text search. Same SQLite file (`kb_*` tables), same MCP endpoint, so one
+connector reads your Telegram archive and holds your notes, and the model can
+read a conversation and note something about it in the same session. Read-write
+by design; delete is the only destructive operation. Off by default — this is a
+Telegram connector first.
+
+Bring an existing Notion workspace in with one command. Export it from Notion as
+**Markdown & CSV**, unzip, and:
+
+```bash
+npm run import-notion -- path/to/export      # add --dry-run to preview
+```
+
+Each Notion page becomes a note (the page-id hash is stripped from the title),
+internal page links are rewritten to `[[wiki links]]` so the backlink graph
+survives, and re-running is safe. Images and attachments come across as
+references, not files — this is a text store.
 
 ### Forwarded messages and reposts
 
